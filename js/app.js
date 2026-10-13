@@ -16,6 +16,7 @@ import {
   isTranslationSupported,
   translateInPieces,
 } from './translation.js';
+import { createTypedText, createTypewriterMachine } from './typewriter.js';
 import { isWhisperSupported, transcribeRecording } from './whisper.js';
 
 const LANGUAGE_STORAGE_KEY = 'lectureLedger.targetLanguage';
@@ -37,7 +38,30 @@ const translationHeadEl = document.getElementById('translationHead');
 const interimEl = document.getElementById('interim');
 const interimOriginalEl = document.getElementById('interimOriginal');
 const interimTranslationEl = document.getElementById('interimTranslation');
+// The live sentence is typed onto the paper by the typewriter drawn below it.
+// Each typebar strikes the character just typed, and the paper jolts slightly.
+function lastTypedCharacterPoint() {
+  const text = interimOriginalEl.firstChild;
+  if (!text?.length) return null;
+  const range = document.createRange();
+  range.setStart(text, text.length - 1);
+  range.setEnd(text, text.length);
+  const rect = [...range.getClientRects()].at(-1);
+  return rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null;
+}
+
+const typewriter = createTypewriterMachine(document.getElementById('typewriterArt'), {
+  getStrikePoint: lastTypedCharacterPoint,
+  onImpact() {
+    interimEl.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(1.5px)' }, { transform: 'translateY(0)' }], {
+      duration: 90,
+    });
+  },
+});
+const liveOriginal = createTypedText(interimOriginalEl, { onCharacterTyped: (character) => typewriter.strike(character) });
+const liveTranslation = createTypedText(interimTranslationEl);
 const emptyStateEl = document.getElementById('emptyState');
+const backToLiveBtn = document.getElementById('backToLiveBtn');
 const exportBtn = document.getElementById('exportBtn');
 const clearBtn = document.getElementById('clearBtn');
 const organizeBtn = document.getElementById('organizeBtn');
@@ -89,8 +113,21 @@ function formatClock(ms) {
   return `${minutes}:${seconds}`;
 }
 
+// Shown like a mechanical counter: each digit in its own window.
 function renderTimer() {
-  timerEl.textContent = formatClock(elapsedMs());
+  const clock = formatClock(elapsedMs());
+  if (timerEl.dataset.clock === clock) return;
+  timerEl.dataset.clock = clock;
+  timerEl.setAttribute('aria-label', `Time listened: ${clock}`);
+  timerEl.replaceChildren(
+    ...[...clock].map((character) => {
+      const cell = document.createElement('span');
+      cell.className = character === ':' ? 'counter-separator' : 'counter-digit';
+      cell.textContent = character;
+      cell.setAttribute('aria-hidden', 'true');
+      return cell;
+    }),
+  );
 }
 
 // ---------- Status messages ----------
@@ -277,13 +314,13 @@ async function keepLiveSentenceTranslated() {
   isLiveTranslating = true;
   let lastTranslatedText = '';
   try {
-    while (interimOriginalEl.textContent && interimOriginalEl.textContent !== lastTranslatedText) {
+    while (liveOriginal.text && liveOriginal.text !== lastTranslatedText) {
       const languageCode = selectedLanguage().code;
       const translator = readyTranslators.get(languageCode);
       if (!translator) break;
-      const text = interimOriginalEl.textContent;
+      const text = liveOriginal.text;
       const translatedText = await translateInPieces(translator, text, languageCode);
-      if (interimOriginalEl.textContent) interimTranslationEl.textContent = translatedText;
+      if (liveOriginal.text) liveTranslation.set(translatedText);
       lastTranslatedText = text;
       await delay(LIVE_TRANSLATION_INTERVAL_MS);
     }
@@ -294,13 +331,105 @@ async function keepLiveSentenceTranslated() {
   }
 }
 
+// While recording, the live row stays visible even between sentences (showing
+// "Listening…"), so the page never jumps as it would if the row collapsed.
 function showLiveSentence(text) {
-  interimOriginalEl.textContent = text;
-  if (!text) interimTranslationEl.textContent = '';
-  interimEl.hidden = !text;
+  liveOriginal.set(text);
+  if (!text) liveTranslation.clear();
+  interimEl.hidden = !text && recorderState === 'idle';
   renderTranscriptState();
   if (text && translationSupported) keepLiveSentenceTranslated();
+  keepLiveRowCentered();
 }
+
+// ---------- Following the live sentence ----------
+
+// While recording, the live row is the end of the paper. It moves down the
+// screen until it reaches the middle, and then the paper scrolls up past it like
+// a scroll, unless the user scrolls away to read ("Back to live" brings it back).
+let isFollowingLive = true;
+const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+// How long a newly confirmed sentence takes to unroll into place.
+const ROW_ARRIVAL_MS = 450;
+let holdFrameId = null;
+
+function liveRowDistanceFromCenter() {
+  const rect = interimEl.getBoundingClientRect();
+  return rect.top + rect.height / 2 - window.innerHeight / 2;
+}
+
+// For durationMs, scrolls the page every frame just enough that the live row
+// never goes below the middle of the screen. While a new sentence unrolls, this
+// moves the paper up continuously instead of in one jump.
+function holdLiveRowAtCenter(durationMs) {
+  cancelAnimationFrame(holdFrameId);
+  const until = performance.now() + durationMs;
+  const step = () => {
+    if (isFollowingLive && !interimEl.hidden) {
+      const distance = liveRowDistanceFromCenter();
+      if (distance > 0.5) window.scrollBy({ top: distance, behavior: 'instant' });
+    }
+    holdFrameId = performance.now() < until ? requestAnimationFrame(step) : null;
+  };
+  step();
+}
+
+// Lets a new sentence grow from nothing to its full height.
+function unrollIntoPlace(row) {
+  if (prefersReducedMotion.matches) return;
+  const style = getComputedStyle(row);
+  row.style.overflow = 'hidden';
+  row
+    .animate(
+      [
+        { height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 },
+        { height: `${row.offsetHeight}px`, paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, opacity: 1 },
+      ],
+      { duration: ROW_ARRIVAL_MS, easing: 'cubic-bezier(0.25, 0.8, 0.35, 1)' },
+    )
+    .finished.finally(() => {
+      row.style.overflow = '';
+    });
+}
+
+// For slower changes, like the live sentence growing by a line.
+function keepLiveRowCentered() {
+  if (!isFollowingLive || interimEl.hidden || holdFrameId !== null) return;
+  // Small drifts are left alone, to avoid jitter.
+  if (liveRowDistanceFromCenter() < window.innerHeight * 0.12) return;
+  holdLiveRowAtCenter(ROW_ARRIVAL_MS);
+}
+
+function setFollowingLive(following) {
+  isFollowingLive = following;
+  backToLiveBtn.hidden = following || recorderState === 'idle';
+}
+
+function stopFollowingWhenUserScrollsUp(event) {
+  if (recorderState === 'idle' || !isFollowingLive) return;
+  const scrollsUp = event.type === 'wheel' ? event.deltaY < 0 : ['ArrowUp', 'PageUp', 'Home'].includes(event.key);
+  if (scrollsUp || event.type === 'touchmove') setFollowingLive(false);
+}
+
+window.addEventListener('wheel', stopFollowingWhenUserScrollsUp, { passive: true });
+window.addEventListener('touchmove', stopFollowingWhenUserScrollsUp, { passive: true });
+window.addEventListener('keydown', stopFollowingWhenUserScrollsUp);
+// Scrolling back to the live row by hand resumes following.
+window.addEventListener(
+  'scroll',
+  () => {
+    if (!isFollowingLive && !interimEl.hidden && Math.abs(liveRowDistanceFromCenter()) < window.innerHeight * 0.15) {
+      setFollowingLive(true);
+    }
+  },
+  { passive: true },
+);
+new ResizeObserver(() => keepLiveRowCentered()).observe(interimEl);
+
+backToLiveBtn.addEventListener('click', () => {
+  setFollowingLive(true);
+  interimEl.scrollIntoView({ block: 'center', behavior: prefersReducedMotion.matches ? 'instant' : 'smooth' });
+});
 
 // ---------- Transcript ----------
 
@@ -328,6 +457,8 @@ function renderRecordButton() {
 
 function enterIdle() {
   recorderState = 'idle';
+  document.body.classList.remove('is-recording');
+  setFollowingLive(true);
   if (listeningSinceMs !== null) {
     elapsedBeforePauseMs = elapsedMs();
     listeningSinceMs = null;
@@ -342,6 +473,9 @@ const transcriber = speechSupported
       speechCode: SOURCE_LANGUAGE.speechCode,
       onListening() {
         recorderState = 'listening';
+        document.body.classList.add('is-recording');
+        setFollowingLive(true);
+        showLiveSentence('');
         listeningSinceMs = Date.now();
         timerInterval = setInterval(renderTimer, 250);
         setStatus('Listening…', { live: true });
@@ -362,14 +496,18 @@ const transcriber = speechSupported
       },
       onInterim: showLiveSentence,
       onFinal(text) {
-        const provisionalTranslation = interimTranslationEl.textContent;
-        interimTranslationEl.textContent = '';
+        const provisionalTranslation = liveTranslation.text;
+        liveOriginal.clear();
+        liveTranslation.clear();
+        typewriter.lineFeed();
         const row = transcript.addLine(text, {
           timeLabel: formatClock(elapsedMs()),
           elapsedMs: elapsedMs(),
           targetLanguage: selectedLanguage().code,
           provisionalTranslation,
         });
+        unrollIntoPlace(row);
+        holdLiveRowAtCenter(ROW_ARRIVAL_MS + 100);
         firstRowThisRecording ??= row;
       },
       onError(message) {
@@ -541,10 +679,19 @@ async function organizeSections(lines) {
   renderTranscriptState();
 
   const languageCode = selectedLanguage().code;
-  const sections = sectionStarts.map((startIndex, n) => ({
+  // Never put a heading directly under another one (for example, one the user named).
+  const startsNeedingHeadings = sectionStarts.filter(
+    (startIndex) => !lines[startIndex].row.previousElementSibling?.classList.contains('section'),
+  );
+  if (startsNeedingHeadings.length === 0) {
+    isOrganizing = false;
+    renderTranscriptState();
+    return;
+  }
+  const sections = startsNeedingHeadings.map((startIndex) => ({
     heading: transcript.addPendingSectionBefore(lines[startIndex].row),
     text: lines
-      .slice(startIndex, sectionStarts[n + 1] ?? lines.length)
+      .slice(startIndex, sectionStarts[sectionStarts.indexOf(startIndex) + 1] ?? lines.length)
       .map((line) => line.text)
       .join(' '),
   }));
@@ -693,6 +840,7 @@ function checkBrowserSupport() {
 
 diagnosticsEl.hidden = !isDebugMode;
 if (isDebugMode) logAiModelStatus();
+renderTimer();
 populateLanguageSelect();
 renderTranslationHead();
 renderTranscriptState();

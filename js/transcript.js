@@ -202,10 +202,6 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
       insertBefore.before(row);
     } else {
       rowsEl.appendChild(row);
-      // Follow the lecture, unless the user is busy editing something in the transcript.
-      if (!rowsEl.contains(document.activeElement)) {
-        row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      }
     }
     changed();
     translateRow(row, provisionalTranslation || undefined);
@@ -217,8 +213,40 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
   function replaceLines(oldRows, newLines) {
     const stillThere = oldRows.filter((row) => row.isConnected);
     const anchor = stillThere[0] ?? null;
+    // Automatic headings among the old lines described the old version; the new
+    // lines get organized again. Headings the user named are kept, and later put
+    // back before the new line at the same point in time.
+    const namedHeadings = [];
+    if (anchor) {
+      const previous = anchor.previousElementSibling;
+      let element = previous?.classList.contains('section') ? previous : anchor;
+      const end = stillThere.at(-1).nextElementSibling;
+      while (element && element !== end) {
+        const next = element.nextElementSibling;
+        if (element.classList.contains('section')) {
+          if (element.querySelector('.section-title').dataset.editedByUser) {
+            // The heading followed the old line that ended at afterMs, so it goes
+            // before the first new line that ends later than that.
+            const oldRowBefore = stillThere.findLast(
+              (row) => row.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING,
+            );
+            namedHeadings.push({ heading: element, afterMs: Number(oldRowBefore?.dataset.elapsedMs ?? -Infinity) });
+          }
+          element.remove();
+        }
+        element = next;
+      }
+    }
     const newRows = newLines.map((line) => addLine(line.text, { ...line, insertBefore: anchor }));
     for (const row of stillThere) row.remove();
+    for (const { heading, afterMs } of namedHeadings) {
+      const target = newRows.find((row) => Number(row.dataset.elapsedMs) > afterMs) ?? newRows.at(-1)?.nextElementSibling;
+      if (target) {
+        target.before(heading);
+      } else {
+        rowsEl.appendChild(heading);
+      }
+    }
     changed();
     return newRows;
   }

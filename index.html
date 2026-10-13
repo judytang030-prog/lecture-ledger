@@ -6,7 +6,7 @@
     <title>Lecture Ledger</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link
-      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Special+Elite&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
@@ -31,7 +31,7 @@
             <label for="targetLanguage">Translate into</label>
             <select id="targetLanguage"></select>
           </div>
-          <div class="timer" id="timer" aria-label="Time listened">00:00</div>
+          <div class="timer" id="timer" role="timer" aria-label="Time listened: 00:00">00:00</div>
         </div>
         <div class="console-row buttons">
           <button id="recordBtn" class="btn-record" type="button">● Start listening</button>
@@ -53,6 +53,28 @@
           <pre class="debug-log" id="debugLog" aria-label="Speech recognition event log"></pre>
           <button id="copyLogBtn" class="btn-ghost btn-small" type="button">Copy log</button>
         </details>
+
+        <div class="console-divider" role="presentation"></div>
+
+        <div class="notes-toolbar">
+          <p class="hint">
+            Sections are organized automatically when you stop recording. Click any sentence, translation, or
+            heading to edit it; editing the English re-translates it. Press Enter to finish, Esc to undo.
+          </p>
+          <div class="buttons">
+            <button
+              id="organizeBtn"
+              class="btn-ghost"
+              type="button"
+              title="Split the whole transcript into sections again and name them"
+            >
+              ✨ Auto-organize
+            </button>
+            <button id="exportBtn" class="btn-ghost" type="button">Export PDF</button>
+            <button id="clearBtn" class="btn-ghost" type="button">Clear</button>
+          </div>
+        </div>
+        <p class="status-line notes-status" id="notesStatus" aria-live="polite"></p>
       </section>
 
       <section class="page" aria-label="Transcript">
@@ -74,7 +96,7 @@
         <div id="rows"></div>
         <div id="interim" class="row interim-row" aria-live="off" hidden>
           <div class="row-side"><span class="time">live</span></div>
-          <div class="original" id="interimOriginal" lang="en"></div>
+          <div class="original" id="interimOriginal" lang="en" data-placeholder="Listening…"></div>
           <div class="translation" id="interimTranslation" dir="auto"></div>
         </div>
         <p id="emptyState" class="empty-state">
@@ -83,25 +105,63 @@
         </p>
       </section>
 
-      <div class="notes-toolbar">
-        <p class="hint">
-          Sections are organized automatically when you stop recording. Click any sentence, translation, or
-          heading to edit it; editing the English re-translates it. Press Enter to finish, Esc to undo.
-        </p>
-        <div class="buttons">
-          <button
-            id="organizeBtn"
-            class="btn-ghost"
-            type="button"
-            title="Split the whole transcript into sections again and name them"
-          >
-            ✨ Auto-organize
-          </button>
-          <button id="exportBtn" class="btn-ghost" type="button">Export PDF</button>
-          <button id="clearBtn" class="btn-ghost" type="button">Clear</button>
-        </div>
+      <div class="typewriter" aria-hidden="true">
+        <svg id="typewriterArt" viewBox="0 0 1000 350" preserveAspectRatio="xMidYMin meet">
+          <defs>
+            <!-- Black rubber platen with a soft highlight. -->
+            <linearGradient id="platenShade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#0d0d0d" />
+              <stop offset="0.35" stop-color="#4d4c4a" />
+              <stop offset="0.6" stop-color="#232322" />
+              <stop offset="1" stop-color="#080808" />
+            </linearGradient>
+            <!-- Warm, slightly worn dark-grey enamel, like a vintage machine. -->
+            <linearGradient id="bodyShade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#5c5a55" />
+              <stop offset="0.12" stop-color="#4a4844" />
+              <stop offset="1" stop-color="#252422" />
+            </linearGradient>
+            <linearGradient id="ribbonShade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0.5" stop-color="#151515" />
+              <stop offset="0.5" stop-color="#9a2f25" />
+            </linearGradient>
+            <clipPath id="platenClip"><rect x="30" y="4" width="940" height="44" rx="22" /></clipPath>
+          </defs>
+          <path class="machine-body" d="M60 30 H940 C962 30 972 44 976 66 L1000 350 H0 L24 66 C28 44 38 30 60 30 Z" />
+          <path class="chrome-trim" d="M40 76 H960" />
+          <path class="basket-well" d="M318 52 A182 182 0 0 0 682 52 Z" />
+          <g id="typebars"></g>
+          <rect class="ribbon" x="476" y="50" width="48" height="8" rx="2" />
+          <path class="type-guide" d="M486 58 H514 L509 70 H491 Z" />
+          <rect x="30" y="4" width="940" height="44" rx="22" fill="url(#platenShade)" />
+          <g clip-path="url(#platenClip)">
+            <g id="platenRidges" class="platen-ridges">
+              <line x1="30" y1="-8" x2="970" y2="-8" />
+              <line x1="30" y1="0" x2="970" y2="0" />
+              <line x1="30" y1="8" x2="970" y2="8" />
+              <line x1="30" y1="16" x2="970" y2="16" />
+              <line x1="30" y1="24" x2="970" y2="24" />
+              <line x1="30" y1="32" x2="970" y2="32" />
+              <line x1="30" y1="40" x2="970" y2="40" />
+              <line x1="30" y1="48" x2="970" y2="48" />
+              <line x1="30" y1="56" x2="970" y2="56" />
+            </g>
+          </g>
+          <line class="paper-bail" x1="70" y1="12" x2="930" y2="12" />
+          <circle class="knob" cx="18" cy="26" r="24" />
+          <circle class="knob-center" cx="18" cy="26" r="10" />
+          <circle class="knob" cx="982" cy="26" r="24" />
+          <circle class="knob-center" cx="982" cy="26" r="10" />
+          <text class="nameplate" x="500" y="244">LECTURE LEDGER</text>
+          <g id="keys"></g>
+          <g id="bell" class="bell" opacity="0.25">
+            <path d="M922 84 a10 10 0 0 1 20 0 v4 h-20 z" />
+            <circle cx="932" cy="91" r="2.5" />
+          </g>
+        </svg>
       </div>
-      <p class="status-line notes-status" id="notesStatus" aria-live="polite"></p>
+
+      <button id="backToLiveBtn" class="back-to-live" type="button" hidden>↓ Back to live</button>
     </main>
   </body>
 </html>
