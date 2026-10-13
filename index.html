@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lecture Ledger</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,500&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="js/app.js"></script>
+  </head>
+  <body>
+    <main class="app">
+      <header class="masthead">
+        <h1>Lecture Ledger</h1>
+        <span class="tag">live transcript and translation while class is running</span>
+      </header>
+
+      <div id="notices"></div>
+
+      <section class="console" aria-label="Recording controls">
+        <div class="console-row">
+          <div class="field">
+            <label for="courseName">Class / subject</label>
+            <input id="courseName" type="text" maxlength="120" placeholder="e.g. CS 124 – Recursion" />
+          </div>
+          <div class="field">
+            <label for="targetLanguage">Translate into</label>
+            <select id="targetLanguage"></select>
+          </div>
+          <div class="timer" id="timer" aria-label="Time listened">00:00</div>
+        </div>
+        <div class="console-row buttons">
+          <button id="recordBtn" class="btn-record" type="button">● Start listening</button>
+          <button id="flagBtn" class="btn-amber" type="button" title="Mark the latest sentence for review">
+            ☆ Flag last sentence
+          </button>
+          <button id="sectionBtn" class="btn-ghost" type="button" title="Add a section heading after the latest sentence">
+            ¶ New section
+          </button>
+        </div>
+        <div class="status-line" role="status" aria-live="polite">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">Not listening</span>
+        </div>
+        <p class="status-line translation-status" id="translationStatus" aria-live="polite"></p>
+        <p class="status-line" id="completeStatus" aria-live="polite"></p>
+        <details class="diagnostics" id="diagnostics" hidden>
+          <summary>Diagnostics · <span id="diagnosticsCount">0 events</span></summary>
+          <pre class="debug-log" id="debugLog" aria-label="Speech recognition event log"></pre>
+          <button id="copyLogBtn" class="btn-ghost btn-small" type="button">Copy log</button>
+        </details>
+      </section>
+
+      <section class="page" aria-label="Transcript">
+        <header class="print-only print-header">
+          <h1 id="printTitle"></h1>
+          <p id="printDetails"></p>
+        </header>
+
+        <nav class="outline" id="outline" aria-labelledby="outlineHeading" hidden>
+          <h2 id="outlineHeading">Sections</h2>
+          <ol id="outlineList"></ol>
+        </nav>
+
+        <div class="columns-head" aria-hidden="true">
+          <span></span>
+          <span>Original · English</span>
+          <span id="translationHead">Translation</span>
+        </div>
+        <div id="rows"></div>
+        <div id="interim" class="row interim-row" aria-live="off" hidden>
+          <div class="row-side"><span class="time">live</span></div>
+          <div class="original" id="interimOriginal" lang="en"></div>
+          <div class="translation" id="interimTranslation" dir="auto"></div>
+        </div>
+        <p id="emptyState" class="empty-state">
+          Press "Start listening" when class begins. Each sentence appears on the left as it is spoken, with its
+          translation beside it.
+        </p>
+      </section>
+
+      <div class="notes-toolbar">
+        <p class="hint">
+          Sections are organized automatically when you stop recording. Click any sentence, translation, or
+          heading to edit it; editing the English re-translates it. Press Enter to finish, Esc to undo.
+        </p>
+        <div class="buttons">
+          <button
+            id="organizeBtn"
+            class="btn-ghost"
+            type="button"
+            title="Split the whole transcript into sections again and name them"
+          >
+            ✨ Auto-organize
+          </button>
+          <button id="exportBtn" class="btn-ghost" type="button">Export PDF</button>
+          <button id="clearBtn" class="btn-ghost" type="button">Clear</button>
+        </div>
+      </div>
+      <p class="status-line notes-status" id="notesStatus" aria-live="polite"></p>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,267 @@
+// The transcript: sentence rows (original + translation) and section headings,
+// all editable in place, plus an outline of the sections for review.
+// Exporting is done by printing this part of the page (see the print styles).
+
+// Lets the user type into an element; onCommit runs when they finish (Enter or
+// clicking away) with a non-empty change. Escape or an empty result undoes the edit.
+function makeEditable(element, onCommit) {
+  element.contentEditable = 'plaintext-only';
+  let textBeforeEdit = '';
+
+  element.addEventListener('focus', () => {
+    textBeforeEdit = element.textContent;
+  });
+  element.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.isComposing) {
+      event.preventDefault();
+      element.blur();
+    } else if (event.key === 'Escape') {
+      element.textContent = textBeforeEdit;
+      element.blur();
+    }
+  });
+  element.addEventListener('blur', () => {
+    const editedText = element.textContent.trim();
+    if (editedText === textBeforeEdit.trim()) return;
+    if (editedText === '' && !element.dataset.allowEmpty) {
+      element.textContent = textBeforeEdit;
+      return;
+    }
+    element.textContent = editedText;
+    onCommit(editedText);
+  });
+}
+
+function createButton(className, label, text) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.textContent = text;
+  return button;
+}
+
+export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateText, onChange }) {
+  function sections() {
+    return [...rowsEl.querySelectorAll('.section')];
+  }
+
+  function rows() {
+    return [...rowsEl.querySelectorAll('.row')];
+  }
+
+  function renderOutline() {
+    const allSections = sections();
+    outlineEl.hidden = allSections.length === 0;
+    outlineListEl.replaceChildren(
+      ...allSections.map((section, index) => {
+        const title = section.querySelector('.section-title').textContent || `Untitled section`;
+        const link = createButton('outline-link', `Jump to section ${index + 1}`, `${index + 1}. ${title}`);
+        link.addEventListener('click', () => section.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        const item = document.createElement('li');
+        item.appendChild(link);
+        return item;
+      }),
+    );
+  }
+
+  function changed() {
+    renderOutline();
+    onChange();
+  }
+
+  // ---------- Translation ----------
+
+  // Each edit bumps the row's version, so a slow, outdated translation never
+  // overwrites a newer one.
+  async function translateRow(row, placeholder = 'Translating…') {
+    const cell = row.querySelector('.translation');
+    const text = row.querySelector('.original').textContent;
+    const version = String(Number(row.dataset.translationVersion ?? 0) + 1);
+    row.dataset.translationVersion = version;
+    const isCurrent = () => row.dataset.translationVersion === version;
+
+    cell.classList.remove('failed');
+    cell.classList.add('pending');
+    cell.textContent = placeholder;
+    try {
+      const translatedText = await translateText(text, row.dataset.targetLanguage);
+      if (!isCurrent()) return;
+      cell.textContent = translatedText;
+      cell.lang = row.dataset.targetLanguage;
+    } catch {
+      if (!isCurrent()) return;
+      cell.textContent = 'Translation failed';
+      cell.classList.add('failed');
+    } finally {
+      if (isCurrent()) cell.classList.remove('pending');
+    }
+  }
+
+  // ---------- Sections ----------
+
+  function createSection() {
+    const section = document.createElement('div');
+    section.className = 'section';
+
+    const number = document.createElement('span');
+    number.className = 'section-number';
+    number.setAttribute('aria-hidden', 'true');
+
+    const title = document.createElement('h2');
+    title.className = 'section-title';
+    title.dataset.placeholder = 'Name this section (e.g. "Recursion: base case")';
+    title.dataset.allowEmpty = 'true';
+    makeEditable(title, () => {
+      title.dataset.editedByUser = 'true';
+      title.classList.remove('naming');
+      renderOutline();
+    });
+
+    const removeButton = createButton('section-remove', 'Remove this section heading (keeps the sentences)', '×');
+    removeButton.addEventListener('click', () => {
+      section.remove();
+      changed();
+    });
+
+    section.append(number, title, removeButton);
+    return section;
+  }
+
+  function insertSection(beforeElement, { focus = true } = {}) {
+    const section = createSection();
+    if (beforeElement) {
+      beforeElement.before(section);
+    } else {
+      rowsEl.appendChild(section);
+    }
+    changed();
+    if (focus) section.querySelector('.section-title').focus();
+    return section;
+  }
+
+  // Adds a heading whose title is filled in later (by automatic organizing).
+  function addPendingSectionBefore(row) {
+    const section = insertSection(row, { focus: false });
+    const title = section.querySelector('.section-title');
+    title.textContent = 'Naming…';
+    title.classList.add('naming');
+    renderOutline();
+    return {
+      setTitle(text) {
+        if (!section.isConnected || title.dataset.editedByUser || document.activeElement === title) return;
+        title.textContent = text;
+        title.classList.remove('naming');
+        renderOutline();
+      },
+    };
+  }
+
+  // ---------- Sentence rows ----------
+
+  // provisionalTranslation is the live translation shown while the sentence was
+  // still being spoken; it stays (greyed) until the final translation arrives.
+  function addLine(text, { timeLabel, elapsedMs, targetLanguage, provisionalTranslation, flagged, insertBefore }) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.dataset.targetLanguage = targetLanguage;
+    row.dataset.elapsedMs = String(elapsedMs);
+
+    const side = document.createElement('div');
+    side.className = 'row-side';
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = timeLabel;
+    const flagButton = createButton('row-flag', 'Flag this sentence for review', '☆');
+    flagButton.setAttribute('aria-pressed', 'false');
+    flagButton.addEventListener('click', () => toggleFlag(row));
+    const sectionButton = createButton('row-section', 'Start a new section at this sentence', '¶');
+    sectionButton.addEventListener('click', () => insertSection(row));
+    const actions = document.createElement('span');
+    actions.className = 'row-actions';
+    actions.append(flagButton, sectionButton);
+    side.append(time, actions);
+
+    const original = document.createElement('div');
+    original.className = 'original';
+    original.lang = 'en';
+    original.textContent = text;
+    makeEditable(original, () => translateRow(row));
+
+    const translation = document.createElement('div');
+    translation.className = 'translation';
+    translation.dir = 'auto';
+    makeEditable(translation, () => {
+      translation.classList.remove('failed');
+    });
+
+    row.append(side, original, translation);
+    if (flagged) toggleFlag(row);
+    if (insertBefore) {
+      insertBefore.before(row);
+    } else {
+      rowsEl.appendChild(row);
+      // Follow the lecture, unless the user is busy editing something in the transcript.
+      if (!rowsEl.contains(document.activeElement)) {
+        row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+    changed();
+    translateRow(row, provisionalTranslation || undefined);
+    return row;
+  }
+
+  // Swaps the live lines of one recording for the complete ones, in the same place.
+  // Returns the new rows.
+  function replaceLines(oldRows, newLines) {
+    const stillThere = oldRows.filter((row) => row.isConnected);
+    const anchor = stillThere[0] ?? null;
+    const newRows = newLines.map((line) => addLine(line.text, { ...line, insertBefore: anchor }));
+    for (const row of stillThere) row.remove();
+    changed();
+    return newRows;
+  }
+
+  // The sentences from firstRow (or from the start) onward, for automatic organizing.
+  function linesFrom(firstRow) {
+    const allRows = rows();
+    const startIndex = firstRow ? allRows.indexOf(firstRow) : 0;
+    if (startIndex < 0) return [];
+    return allRows.slice(startIndex).map((row) => ({
+      row,
+      text: row.querySelector('.original').textContent,
+      elapsedMs: Number(row.dataset.elapsedMs),
+    }));
+  }
+
+  function toggleFlag(row) {
+    const isFlagged = row.classList.toggle('flagged');
+    const flagButton = row.querySelector('.row-flag');
+    flagButton.textContent = isFlagged ? '★' : '☆';
+    flagButton.setAttribute('aria-pressed', String(isFlagged));
+  }
+
+  return {
+    addLine,
+    addSection: () => insertSection(null),
+    flagLastLine() {
+      const lastRow = rows().at(-1);
+      if (lastRow) toggleFlag(lastRow);
+    },
+    addPendingSectionBefore,
+    linesFrom,
+    replaceLines,
+    hasContent: () => rowsEl.children.length > 0,
+    hasLines: () => rows().length > 0,
+    hasSections: () => sections().length > 0,
+    removeAllSections() {
+      for (const section of sections()) section.remove();
+      changed();
+    },
+    clear() {
+      rowsEl.replaceChildren();
+      changed();
+    },
+  };
+}
