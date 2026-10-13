@@ -17,7 +17,7 @@ import {
   translateInPieces,
 } from './translation.js';
 import { createTypedText, createTypewriterMachine } from './typewriter.js';
-import { isWhisperSupported, transcribeRecording } from './whisper.js';
+import { UnreadableAudioError, isWhisperSupported, transcribeRecording } from './whisper.js';
 
 const LANGUAGE_STORAGE_KEY = 'lectureLedger.targetLanguage';
 // How often the sentence still being spoken is re-translated.
@@ -65,6 +65,8 @@ const backToLiveBtn = document.getElementById('backToLiveBtn');
 const exportBtn = document.getElementById('exportBtn');
 const clearBtn = document.getElementById('clearBtn');
 const organizeBtn = document.getElementById('organizeBtn');
+const uploadBtn = document.getElementById('uploadBtn');
+const uploadInput = document.getElementById('uploadInput');
 const notesStatusEl = document.getElementById('notesStatus');
 const printTitleEl = document.getElementById('printTitle');
 const printDetailsEl = document.getElementById('printDetails');
@@ -92,6 +94,9 @@ let audioRecordingPromise = null;
 let recordingStartMs = 0;
 // Bumped by Clear, so a complete transcript that finishes afterwards is not added back.
 let clearCount = 0;
+// False when this browser or page can't use the microphone.
+let canRecord = true;
+let isUploading = false;
 
 // One translator per target language, created on first use and then reused.
 const translatorsByLanguage = new Map();
@@ -336,7 +341,7 @@ async function keepLiveSentenceTranslated() {
 function showLiveSentence(text) {
   liveOriginal.set(text);
   if (!text) liveTranslation.clear();
-  interimEl.hidden = !text && recorderState === 'idle';
+  interimEl.hidden = !text && !isTypewriterActive();
   renderTranscriptState();
   if (text && translationSupported) keepLiveSentenceTranslated();
   keepLiveRowCentered();
@@ -402,11 +407,11 @@ function keepLiveRowCentered() {
 
 function setFollowingLive(following) {
   isFollowingLive = following;
-  backToLiveBtn.hidden = following || recorderState === 'idle';
+  backToLiveBtn.hidden = following || !isTypewriterActive();
 }
 
 function stopFollowingWhenUserScrollsUp(event) {
-  if (recorderState === 'idle' || !isFollowingLive) return;
+  if (!isTypewriterActive() || !isFollowingLive) return;
   const scrollsUp = event.type === 'wheel' ? event.deltaY < 0 : ['ArrowUp', 'PageUp', 'Home'].includes(event.key);
   if (scrollsUp || event.type === 'touchmove') setFollowingLive(false);
 }
@@ -447,6 +452,34 @@ const transcript = createTranscript({
   onChange: renderTranscriptState,
 });
 
+// ---------- Typing onto the paper ----------
+
+// The typewriter is busy while recording, and while it types an uploaded recording.
+let isTypingUpload = false;
+
+function isTypewriterActive() {
+  return recorderState !== 'idle' || isTypingUpload;
+}
+
+function renderTypewriterActive() {
+  document.body.classList.toggle('is-typing', isTypewriterActive());
+  setFollowingLive(true);
+  renderUploadAvailability();
+}
+
+// Moves the live line onto the paper as a finished line: the platen turns, the
+// line unrolls into place, and the paper scrolls up. Returns the new row.
+function commitLiveLine(text, { timeLabel, elapsedMs: lineElapsedMs, targetLanguage }) {
+  const provisionalTranslation = liveTranslation.text;
+  liveOriginal.clear();
+  liveTranslation.clear();
+  typewriter.lineFeed();
+  const row = transcript.addLine(text, { timeLabel, elapsedMs: lineElapsedMs, targetLanguage, provisionalTranslation });
+  unrollIntoPlace(row);
+  holdLiveRowAtCenter(ROW_ARRIVAL_MS + 100);
+  return row;
+}
+
 // ---------- Recording ----------
 
 function renderRecordButton() {
@@ -457,8 +490,7 @@ function renderRecordButton() {
 
 function enterIdle() {
   recorderState = 'idle';
-  document.body.classList.remove('is-recording');
-  setFollowingLive(true);
+  renderTypewriterActive();
   if (listeningSinceMs !== null) {
     elapsedBeforePauseMs = elapsedMs();
     listeningSinceMs = null;
@@ -473,8 +505,7 @@ const transcriber = speechSupported
       speechCode: SOURCE_LANGUAGE.speechCode,
       onListening() {
         recorderState = 'listening';
-        document.body.classList.add('is-recording');
-        setFollowingLive(true);
+        renderTypewriterActive();
         showLiveSentence('');
         listeningSinceMs = Date.now();
         timerInterval = setInterval(renderTimer, 250);
@@ -496,18 +527,11 @@ const transcriber = speechSupported
       },
       onInterim: showLiveSentence,
       onFinal(text) {
-        const provisionalTranslation = liveTranslation.text;
-        liveOriginal.clear();
-        liveTranslation.clear();
-        typewriter.lineFeed();
-        const row = transcript.addLine(text, {
+        const row = commitLiveLine(text, {
           timeLabel: formatClock(elapsedMs()),
           elapsedMs: elapsedMs(),
           targetLanguage: selectedLanguage().code,
-          provisionalTranslation,
         });
-        unrollIntoPlace(row);
-        holdLiveRowAtCenter(ROW_ARRIVAL_MS + 100);
         firstRowThisRecording ??= row;
       },
       onError(message) {
@@ -636,6 +660,154 @@ async function makeCompleteTranscript(recordingPromise, liveLines, startMs) {
     keepLiveVersion(`Couldn't make the complete transcript (${error.message}). The live version was kept.`);
   }
 }
+
+// ---------- Uploading a recording ----------
+
+// While few lines are waiting, each is typed out; with more, they roll in
+// directly so a long recording doesn't take longer to show than to transcribe.
+const TYPE_LINES_WHEN_FEWER_THAN = 6;
+
+function renderUploadAvailability() {
+  uploadBtn.disabled = !completeTranscriptSupported || isUploading || recorderState !== 'idle';
+  recordBtn.disabled = !canRecord || isUploading;
+}
+
+function describeUploadProgress(fileName, progress) {
+  if (progress.type === 'partial' || progress.type === 'progress') {
+    return `${fileName}: transcribing ${formatClock(progress.doneSeconds * 1000)} of ${formatClock(progress.totalSeconds * 1000)}…`;
+  }
+  return describeWhisperProgress(progress).replace('Complete transcript', fileName);
+}
+
+// Transcribes an audio or video file with Whisper and adds it after the
+// current transcript, under a divider with the file's name. Lines appear as
+// each minute of audio is done, typed by the typewriter; then the recording is
+// organized into sections.
+async function transcribeUploadedFile(file) {
+  if (isUploading || recorderState !== 'idle') return;
+  isUploading = true;
+  renderUploadAvailability();
+  const clearCountAtStart = clearCount;
+  const wasCleared = () => clearCount !== clearCountAtStart;
+  const targetLanguage = selectedLanguage().code;
+  if (translationSupported) prepareTranslator(selectedLanguage()).catch(() => {});
+
+  transcript.addDivider(file.name);
+  setCompleteStatus(`${file.name}: reading the file…`);
+
+  const segmentsSoFar = [];
+  let linesQueued = 0;
+  const lineQueue = [];
+  const uploadRows = [];
+  let typingDone = Promise.resolve();
+
+  const toRowLine = (line) => ({
+    text: line.text,
+    timeLabel: formatClock(line.startSeconds * 1000),
+    elapsedMs: line.endSeconds * 1000,
+    targetLanguage,
+  });
+
+  async function typeQueuedLines() {
+    isTypingUpload = true;
+    renderTypewriterActive();
+    while (lineQueue.length > 0 && !wasCleared()) {
+      const line = lineQueue.shift();
+      const typeIt = lineQueue.length < TYPE_LINES_WHEN_FEWER_THAN && !document.hidden;
+      if (typeIt) {
+        showLiveSentence(line.text);
+        await liveOriginal.whenTyped();
+        await delay(120);
+      }
+      if (wasCleared()) break;
+      uploadRows.push(commitLiveLine(line.text, line));
+    }
+    isTypingUpload = false;
+    showLiveSentence('');
+    renderTypewriterActive();
+  }
+
+  // Queues the lines that are certainly complete; the last line may still
+  // continue in the next minute of audio, unless this is the end.
+  function queueReadyLines({ isEnd }) {
+    const lines = segmentsToLines(segmentsSoFar);
+    const ready = lines.slice(linesQueued, isEnd ? lines.length : -1);
+    if (ready.length === 0) return;
+    linesQueued += ready.length;
+    lineQueue.push(...ready.map(toRowLine));
+    if (!isTypingUpload) typingDone = typeQueuedLines();
+  }
+
+  try {
+    const { device } = await transcribeRecording(file, (progress) => {
+      if (wasCleared()) return;
+      if (progress.type === 'retrying') {
+        // Whisper starts over on the processor, so its partial lines are taken back.
+        lineQueue.length = 0;
+        segmentsSoFar.length = 0;
+        linesQueued = 0;
+        transcript.removeLines(uploadRows.splice(0));
+      }
+      if (progress.type === 'partial') {
+        segmentsSoFar.push(...progress.segments);
+        queueReadyLines({ isEnd: false });
+      }
+      setCompleteStatus(describeUploadProgress(file.name, progress));
+    });
+    if (wasCleared()) {
+      setCompleteStatus('');
+      return;
+    }
+    queueReadyLines({ isEnd: true });
+    await typingDone;
+    logDebugEvent(`Whisper (${device}) transcribed ${file.name}: ${uploadRows.length} lines`);
+    if (uploadRows.length === 0) {
+      setCompleteStatus(`${file.name}: Whisper heard no speech in this file.`, { error: true });
+      return;
+    }
+    setCompleteStatus(`${file.name}: done, ${uploadRows.length} sentence${uploadRows.length === 1 ? '' : 's'}.`);
+    organizeSections(transcript.linesFrom(uploadRows[0]).slice(0, uploadRows.length));
+  } catch (error) {
+    logDebugEvent(`Upload failed: ${error.message}`);
+    setCompleteStatus(
+      error instanceof UnreadableAudioError
+        ? `${file.name}: ${error.message}. Try an .m4a, .mp3, .wav or .mp4 file.`
+        : `${file.name}: couldn't transcribe it (${error.message}).`,
+      { error: true },
+    );
+  } finally {
+    isUploading = false;
+    renderUploadAvailability();
+  }
+}
+
+function isFileDrag(event) {
+  return [...(event.dataTransfer?.types ?? [])].includes('Files');
+}
+
+uploadBtn.addEventListener('click', () => uploadInput.click());
+uploadInput.addEventListener('change', () => {
+  const [file] = uploadInput.files;
+  uploadInput.value = ''; // so choosing the same file again still works
+  if (file) transcribeUploadedFile(file);
+});
+
+// A file can also be dropped anywhere on the page.
+window.addEventListener('dragover', (event) => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  document.body.classList.toggle('is-dropping-file', !uploadBtn.disabled);
+});
+window.addEventListener('dragleave', (event) => {
+  if (event.relatedTarget === null) document.body.classList.remove('is-dropping-file');
+});
+window.addEventListener('drop', (event) => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  document.body.classList.remove('is-dropping-file');
+  const [file] = event.dataTransfer.files;
+  if (file && !uploadBtn.disabled) transcribeUploadedFile(file);
+});
 
 // ---------- Automatic sections ----------
 
@@ -822,13 +994,13 @@ function checkBrowserSupport() {
     addNotice(
       'The microphone only works when this page is opened from https:// or http://localhost, not as a file. See the README for how to run it.',
     );
-    recordBtn.disabled = true;
+    canRecord = false;
     setStatus('Microphone unavailable on this page.', { error: true });
     return;
   }
   if (!speechSupported) {
     addNotice('This browser has no live speech recognition. Open this page in Chrome on a computer.');
-    recordBtn.disabled = true;
+    canRecord = false;
     setStatus('Speech recognition unavailable in this browser.', { error: true });
   }
   if (!translationSupported) {
@@ -845,4 +1017,5 @@ populateLanguageSelect();
 renderTranslationHead();
 renderTranscriptState();
 checkBrowserSupport();
+renderUploadAvailability();
 describeTranslationReadiness();

@@ -251,6 +251,21 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
     return newRows;
   }
 
+  // A labelled line marking where an uploaded recording's transcript begins.
+  function addDivider(label) {
+    const divider = document.createElement('div');
+    divider.className = 'file-divider';
+    divider.textContent = label;
+    rowsEl.appendChild(divider);
+    changed();
+    return divider;
+  }
+
+  function removeLines(rowsToRemove) {
+    for (const row of rowsToRemove) row.remove();
+    changed();
+  }
+
   // The sentences from firstRow (or from the start) onward, for automatic organizing.
   function linesFrom(firstRow) {
     const allRows = rows();
@@ -277,8 +292,10 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
       const lastRow = rows().at(-1);
       if (lastRow) toggleFlag(lastRow);
     },
+    addDivider,
     addPendingSectionBefore,
     linesFrom,
+    removeLines,
     replaceLines,
     hasContent: () => rowsEl.children.length > 0,
     hasLines: () => rows().length > 0,

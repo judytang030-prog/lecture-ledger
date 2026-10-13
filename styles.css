@@ -672,7 +672,7 @@ p.status-line:empty {
 }
 
 /* The typing position. */
-body.is-recording .interim-row .original::after {
+body.is-typing .interim-row .original::after {
   content: '';
   display: inline-block;
   width: 0.55em;
@@ -877,6 +877,35 @@ body.is-recording .interim-row .original::after {
 .notes-toolbar .btn-ghost {
   padding: 7px 14px;
   font-size: 0.72rem;
+}
+
+/* Where an uploaded recording's transcript begins: its file name between rules. */
+.file-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 26px 0 4px;
+  font-family: var(--font-stamped);
+  font-size: 0.95rem;
+  color: var(--ink-soft);
+}
+
+#rows > .file-divider:first-child {
+  margin-top: 8px;
+}
+
+.file-divider::before,
+.file-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed var(--ink-soft);
+  opacity: 0.6;
+}
+
+/* Dragging a file over the page. */
+body.is-dropping-file .page {
+  outline: 3px dashed var(--brass);
+  outline-offset: 6px;
 }
 
 .print-only {

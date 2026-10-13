@@ -41,6 +41,20 @@
           <button id="sectionBtn" class="btn-ghost" type="button" title="Add a section heading after the latest sentence">
             ¶ New section
           </button>
+          <button
+            id="uploadBtn"
+            class="btn-ghost"
+            type="button"
+            title="Transcribe an audio or video file with Whisper (you can also drop a file onto the page)"
+          >
+            ⇪ Upload recording
+          </button>
+          <input
+            id="uploadInput"
+            type="file"
+            accept="audio/*,video/*,.m4a,.mp3,.wav,.mp4,.mov,.webm,.ogg"
+            hidden
+          />
         </div>
         <div class="status-line" role="status" aria-live="polite">
           <span class="dot" id="statusDot"></span>

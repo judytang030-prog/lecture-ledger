@@ -3,6 +3,7 @@
 // Messages out: { type: 'loading', fraction } while the model downloads (first time only),
 //               { type: 'starting', device } while the model loads onto the GPU or CPU,
 //               { type: 'progress', doneSeconds, totalSeconds } while transcribing,
+//               { type: 'partial', segments, doneSeconds, totalSeconds } after each minute of audio,
 //               { type: 'done', segments: [{ text, startSeconds, endSeconds }], device },
 //               { type: 'error', message }
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1';
@@ -78,15 +79,16 @@ async function transcribe(audio, onlyDevice) {
       chunk_length_s: 30,
       stride_length_s: 5,
     });
-    for (const chunk of output.chunks ?? []) {
+    const windowSegments = (output.chunks ?? []).map((chunk) => {
       const [start, end] = chunk.timestamp;
-      segments.push({
+      return {
         text: chunk.text,
         startSeconds: windowStart + (start ?? 0),
         endSeconds: windowStart + (end ?? windowEnd - windowStart),
-      });
-    }
-    self.postMessage({ type: 'progress', doneSeconds: windowEnd, totalSeconds });
+      };
+    });
+    segments.push(...windowSegments);
+    self.postMessage({ type: 'partial', segments: windowSegments, doneSeconds: windowEnd, totalSeconds });
   }
   return { segments, device };
 }

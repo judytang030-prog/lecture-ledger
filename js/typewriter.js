@@ -26,9 +26,17 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
   let frameId = null;
   let lastFrameTime = 0;
   let characterBudget = 0;
+  // Promises waiting for the current text to be fully typed.
+  let waitingForTyped = [];
 
   function render() {
     element.textContent = shown;
+  }
+
+  function settleIfTyped() {
+    if (shown !== target) return;
+    for (const resolve of waitingForTyped) resolve();
+    waitingForTyped = [];
   }
 
   function typeNextCharacters(now) {
@@ -47,6 +55,7 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
     render();
     for (const character of typed) onCharacterTyped(character);
     frameId = shown.length < target.length ? requestAnimationFrame(typeNextCharacters) : null;
+    settleIfTyped();
   }
 
   return {
@@ -58,6 +67,7 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
       if (prefersReducedMotion.matches) {
         shown = text;
         render();
+        settleIfTyped();
         return;
       }
       if (!target.startsWith(shown)) {
@@ -69,6 +79,7 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
         characterBudget = 0;
         frameId = requestAnimationFrame(typeNextCharacters);
       }
+      settleIfTyped();
     },
     clear() {
       cancelAnimationFrame(frameId);
@@ -76,6 +87,14 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
       shown = '';
       target = '';
       render();
+      settleIfTyped();
+    },
+    // Resolves once everything set so far has appeared (or the text was cleared).
+    whenTyped() {
+      return new Promise((resolve) => {
+        waitingForTyped.push(resolve);
+        settleIfTyped();
+      });
     },
   };
 }

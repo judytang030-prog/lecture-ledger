@@ -10,11 +10,18 @@ export function isWhisperSupported() {
   return Boolean(window.Worker && window.AudioContext);
 }
 
+export class UnreadableAudioError extends Error {}
+
 // Whisper expects 16 kHz mono audio; the browser resamples while decoding.
 async function decodeToMono16k(audioBlob) {
   const audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
   try {
-    const audioBuffer = await audioContext.decodeAudioData(await audioBlob.arrayBuffer());
+    let audioBuffer;
+    try {
+      audioBuffer = await audioContext.decodeAudioData(await audioBlob.arrayBuffer());
+    } catch {
+      throw new UnreadableAudioError("the browser can't read the audio in this file");
+    }
     // A copy, because the worker takes ownership of the data it is sent.
     return new Float32Array(audioBuffer.getChannelData(0));
   } finally {
@@ -79,7 +86,9 @@ function runInWorker(audio, onProgress, device) {
 
 // Resolves to { segments: [{ text, startSeconds, endSeconds }], device }.
 // onProgress receives { type: 'loading', fraction }, { type: 'starting', device },
-// { type: 'progress', doneSeconds, totalSeconds }, or { type: 'retrying' }.
+// { type: 'progress', doneSeconds, totalSeconds }, { type: 'partial', segments,
+// doneSeconds, totalSeconds } (the newest minute's segments), or { type: 'retrying' },
+// after which partial results start over.
 // If Whisper gets stuck on the GPU, it is tried once more on the CPU.
 export function transcribeRecording(audioBlob, onProgress) {
   const job = queue.then(async () => {
