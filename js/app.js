@@ -5,19 +5,31 @@ import {
   writeHeadline,
 } from './headlines.js';
 import { DEFAULT_TARGET_LANGUAGE, SOURCE_LANGUAGE, TARGET_LANGUAGES, findTargetLanguage } from './languages.js';
-import { lineIndexAt, segmentsToLines } from './complete-transcript.js';
-import { isRecordingSupported, startAudioRecording } from './recorder.js';
+import { appendChunkSegments, segmentsToLines } from './complete-transcript.js';
+import { createLiveDraft } from './live-draft.js';
+import { CAPTURE_SAMPLE_RATE, isAudioCaptureSupported, startAudioCapture } from './recorder.js';
 import { cleanHeadline, findSectionStarts, keywordTitle } from './sections.js';
+import { createSpeechChunker } from './speech-chunks.js';
+import { groupSpeakers, speakerNames } from './speakers.js';
 import { createLiveTranscriber, isSpeechSupported } from './speech.js';
 import { createTranscript } from './transcript.js';
 import {
   checkTranslationAvailability,
   createTranslator,
   isTranslationSupported,
+  joinTranslatedPieces,
+  splitForTranslation,
   translateInPieces,
 } from './translation.js';
-import { createTypedText, createTypewriterMachine } from './typewriter.js';
-import { UnreadableAudioError, isWhisperSupported, transcribeRecording } from './whisper.js';
+import { LINE_FEED_MS, createTypedText, createTypewriterMachine } from './typewriter.js';
+import {
+  UnreadableAudioError,
+  embedSpeakers,
+  isWhisperSupported,
+  transcribeAudio,
+  transcribeRecording,
+  warmUpWhisper,
+} from './whisper.js';
 
 const LANGUAGE_STORAGE_KEY = 'lectureLedger.targetLanguage';
 // How often the sentence still being spoken is re-translated.
@@ -26,6 +38,7 @@ const LIVE_TRANSLATION_INTERVAL_MS = 400;
 const noticesEl = document.getElementById('notices');
 const courseNameInput = document.getElementById('courseName');
 const languageSelect = document.getElementById('targetLanguage');
+const speakerCountSelect = document.getElementById('speakerCount');
 const timerEl = document.getElementById('timer');
 const recordBtn = document.getElementById('recordBtn');
 const flagBtn = document.getElementById('flagBtn');
@@ -58,8 +71,29 @@ const typewriter = createTypewriterMachine(document.getElementById('typewriterAr
     });
   },
 });
-const liveOriginal = createTypedText(interimOriginalEl, { onCharacterTyped: (character) => typewriter.strike(character) });
-const liveTranslation = createTypedText(interimTranslationEl);
+const liveOriginal = createTypedText(interimOriginalEl, {
+  onCharacterTyped(character) {
+    typewriter.strike(character);
+  },
+});
+// The live translation has a settled part (finished clauses, never changed) and
+// a lighter tail (the clause still being spoken), which is updated in place.
+// It isn't typed: retyping a changing translation made it flicker.
+const liveTranslationSettledEl = document.getElementById('liveTranslationSettled');
+const liveTranslationTailEl = document.getElementById('liveTranslationTail');
+const liveTranslation = {
+  text: '',
+  show(settled, tail, languageCode) {
+    this.text = joinTranslatedPieces([settled, tail].filter(Boolean), languageCode);
+    liveTranslationSettledEl.textContent = settled;
+    liveTranslationTailEl.textContent = settled && tail ? this.text.slice(settled.length) : tail;
+  },
+  clear() {
+    this.text = '';
+    liveTranslationSettledEl.textContent = '';
+    liveTranslationTailEl.textContent = '';
+  },
+};
 const emptyStateEl = document.getElementById('emptyState');
 const backToLiveBtn = document.getElementById('backToLiveBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -80,7 +114,7 @@ const isDebugMode = new URLSearchParams(location.search).has('debug');
 
 const speechSupported = isSpeechSupported();
 const translationSupported = isTranslationSupported();
-const completeTranscriptSupported = isRecordingSupported() && isWhisperSupported();
+const completeTranscriptSupported = isAudioCaptureSupported() && isWhisperSupported();
 
 // 'idle' → 'starting' (waiting for the mic) → 'listening' → back to 'idle'.
 let recorderState = 'idle';
@@ -89,9 +123,11 @@ let listeningSinceMs = null;
 let timerInterval = null;
 // The first sentence of the current recording, so Stop organizes only what was just recorded.
 let firstRowThisRecording = null;
-// The audio being recorded for Whisper (a promise of the recorder), and where it starts on the timer.
-let audioRecordingPromise = null;
+// Where the current recording starts on the timer.
 let recordingStartMs = 0;
+// The current recording's Whisper session (see startLiveWhisper), or null when
+// recording without Whisper.
+let liveWhisper = null;
 // Bumped by Clear, so a complete transcript that finishes afterwards is not added back.
 let clearCount = 0;
 // False when this browser or page can't use the microphone.
@@ -314,20 +350,38 @@ let isLiveTranslating = false;
 
 // Keeps re-translating the sentence being spoken, at most every
 // LIVE_TRANSLATION_INTERVAL_MS, until it stops changing.
+// Translations of clauses, so finished ones never change once shown.
+const liveClauseTranslations = new Map();
+
+async function translateClause(translator, clause, languageCode) {
+  const key = `${languageCode}|${clause}`;
+  if (!liveClauseTranslations.has(key)) {
+    liveClauseTranslations.set(key, (await translator.translate(clause)).trim());
+  }
+  return liveClauseTranslations.get(key);
+}
+
+// Translates the sentence being spoken clause by clause, at most every
+// LIVE_TRANSLATION_INTERVAL_MS while it keeps changing. Finished clauses are
+// translated once and stay put; only the clause still being spoken (the tail)
+// is re-translated, so the beginning of the translation never rewords itself.
 async function keepLiveSentenceTranslated() {
   if (isLiveTranslating) return;
   isLiveTranslating = true;
-  let lastTranslatedText = '';
   try {
-    while (liveOriginal.text && liveOriginal.text !== lastTranslatedText) {
+    while (liveOriginal.text) {
       const languageCode = selectedLanguage().code;
       const translator = readyTranslators.get(languageCode);
       if (!translator) break;
       const text = liveOriginal.text;
-      const translatedText = await translateInPieces(translator, text, languageCode);
-      if (liveOriginal.text) liveTranslation.set(translatedText);
-      lastTranslatedText = text;
+      const clauses = splitForTranslation(text);
+      const settled = [];
+      for (const clause of clauses.slice(0, -1)) settled.push(await translateClause(translator, clause, languageCode));
+      const tail = clauses.length > 0 ? await translateClause(translator, clauses.at(-1), languageCode) : '';
+      if (liveOriginal.text !== text) continue;
+      liveTranslation.show(joinTranslatedPieces(settled, languageCode), tail, languageCode);
       await delay(LIVE_TRANSLATION_INTERVAL_MS);
+      if (liveOriginal.text === text) break;
     }
   } catch {
     // Live translation is a preview; the confirmed sentence is translated again anyway.
@@ -340,7 +394,10 @@ async function keepLiveSentenceTranslated() {
 // "Listening…"), so the page never jumps as it would if the row collapsed.
 function showLiveSentence(text) {
   liveOriginal.set(text);
-  if (!text) liveTranslation.clear();
+  if (!text) {
+    liveTranslation.clear();
+    liveClauseTranslations.clear();
+  }
   interimEl.hidden = !text && !isTypewriterActive();
   renderTranscriptState();
   if (text && translationSupported) keepLiveSentenceTranslated();
@@ -349,60 +406,62 @@ function showLiveSentence(text) {
 
 // ---------- Following the live sentence ----------
 
-// While recording, the live row is the end of the paper. It moves down the
-// screen until it reaches the middle, and then the paper scrolls up past it like
-// a scroll, unless the user scrolls away to read ("Back to live" brings it back).
+// While recording, the live row is the end of the paper, where the typewriter
+// types. It moves down the screen until it reaches the middle; after that, each
+// finished sentence stays where it was typed and the whole sheet rolls up, like
+// paper fed by a typewriter's platen, until the live row is back in the middle.
+// The user can scroll away to read ("Back to live" brings the live row back).
 let isFollowingLive = true;
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-// How long a newly confirmed sentence takes to unroll into place.
-const ROW_ARRIVAL_MS = 450;
-let holdFrameId = null;
+// How long the paper takes to roll up by a line, as the platen turns.
+const ROLL_MS = LINE_FEED_MS;
+let rollFrameId = null;
 
 function liveRowDistanceFromCenter() {
   const rect = interimEl.getBoundingClientRect();
   return rect.top + rect.height / 2 - window.innerHeight / 2;
 }
 
-// For durationMs, scrolls the page every frame just enough that the live row
-// never goes below the middle of the screen. While a new sentence unrolls, this
-// moves the paper up continuously instead of in one jump.
-function holdLiveRowAtCenter(durationMs) {
-  cancelAnimationFrame(holdFrameId);
-  const until = performance.now() + durationMs;
-  const step = () => {
-    if (isFollowingLive && !interimEl.hidden) {
-      const distance = liveRowDistanceFromCenter();
-      if (distance > 0.5) window.scrollBy({ top: distance, behavior: 'instant' });
-    }
-    holdFrameId = performance.now() < until ? requestAnimationFrame(step) : null;
+// Starts and stops gently, like the platen's turn.
+function easeInOut(progress) {
+  return (1 - Math.cos(Math.PI * progress)) / 2;
+}
+
+// Where the page should be scrolled to: the live row in the middle of the
+// screen, or as far as the page goes (the typewriter at the bottom of the
+// screen, with the paper coming out of it).
+function rollTargetY() {
+  const bottomY = document.documentElement.scrollHeight - window.innerHeight;
+  return Math.min(window.scrollY + liveRowDistanceFromCenter(), bottomY);
+}
+
+// Rolls the whole sheet up over ROLL_MS until the live row is back in place
+// (see rollTargetY). Never rolls it back down.
+function rollPaperToLiveRow() {
+  if (!isFollowingLive || interimEl.hidden) return;
+  if (prefersReducedMotion.matches) {
+    window.scrollTo({ top: Math.max(window.scrollY, rollTargetY()), behavior: 'instant' });
+    return;
+  }
+  cancelAnimationFrame(rollFrameId);
+  const startY = window.scrollY;
+  const startTime = performance.now();
+  const step = (now) => {
+    const progress = Math.min((now - startTime) / ROLL_MS, 1);
+    // Measured every frame, in case the live row grows while the paper rolls.
+    const targetY = Math.max(startY, rollTargetY());
+    window.scrollTo({ top: startY + (targetY - startY) * easeInOut(progress), behavior: 'instant' });
+    rollFrameId = progress < 1 && isFollowingLive ? requestAnimationFrame(step) : null;
   };
-  step();
+  rollFrameId = requestAnimationFrame(step);
 }
 
-// Lets a new sentence grow from nothing to its full height.
-function unrollIntoPlace(row) {
-  if (prefersReducedMotion.matches) return;
-  const style = getComputedStyle(row);
-  row.style.overflow = 'hidden';
-  row
-    .animate(
-      [
-        { height: '0px', paddingTop: '0px', paddingBottom: '0px', opacity: 0 },
-        { height: `${row.offsetHeight}px`, paddingTop: style.paddingTop, paddingBottom: style.paddingBottom, opacity: 1 },
-      ],
-      { duration: ROW_ARRIVAL_MS, easing: 'cubic-bezier(0.25, 0.8, 0.35, 1)' },
-    )
-    .finished.finally(() => {
-      row.style.overflow = '';
-    });
-}
-
-// For slower changes, like the live sentence growing by a line.
+// For gradual changes, like the live sentence growing by a line: small drifts
+// are left alone, to avoid jitter.
 function keepLiveRowCentered() {
-  if (!isFollowingLive || interimEl.hidden || holdFrameId !== null) return;
-  // Small drifts are left alone, to avoid jitter.
+  if (!isFollowingLive || interimEl.hidden || rollFrameId !== null) return;
   if (liveRowDistanceFromCenter() < window.innerHeight * 0.12) return;
-  holdLiveRowAtCenter(ROW_ARRIVAL_MS);
+  rollPaperToLiveRow();
 }
 
 function setFollowingLive(following) {
@@ -429,7 +488,15 @@ window.addEventListener(
   },
   { passive: true },
 );
+// The live row grows as words are typed.
 new ResizeObserver(() => keepLiveRowCentered()).observe(interimEl);
+// Lines above it grow when a sentence continues or a translation arrives; the
+// sheet rolls up by that much (a roll already under way follows on its own).
+new ResizeObserver(() => {
+  if (isFollowingLive && !interimEl.hidden && rollFrameId === null && liveRowDistanceFromCenter() > 2) {
+    rollPaperToLiveRow();
+  }
+}).observe(document.getElementById('rows'));
 
 backToLiveBtn.addEventListener('click', () => {
   setFollowingLive(true);
@@ -467,20 +534,52 @@ function renderTypewriterActive() {
   renderUploadAvailability();
 }
 
-// Moves the live line onto the paper as a finished line: the platen turns, the
-// line unrolls into place, and the paper scrolls up. Returns the new row.
+// Moves the live line onto the paper as a finished line, where it was typed:
+// the platen turns and the sheet rolls up. Returns the new row.
 function commitLiveLine(text, { timeLabel, elapsedMs: lineElapsedMs, targetLanguage }) {
   const provisionalTranslation = liveTranslation.text;
   liveOriginal.clear();
   liveTranslation.clear();
   typewriter.lineFeed();
   const row = transcript.addLine(text, { timeLabel, elapsedMs: lineElapsedMs, targetLanguage, provisionalTranslation });
-  unrollIntoPlace(row);
-  holdLiveRowAtCenter(ROW_ARRIVAL_MS + 100);
+  rollPaperToLiveRow();
   return row;
 }
 
 // ---------- Recording ----------
+
+// Chrome sometimes confirms a tiny piece like "and then" on its own. Pieces
+// shorter than this wait in the live row and join the next line instead of
+// sitting alone on a line.
+const MIN_WORDS_PER_LIVE_LINE = 4;
+// { text, timeLabel } of a short piece waiting to join the next line, or null.
+let heldPiece = null;
+// The latest line of this recording, which the rest of a cut-off word joins.
+let lastLiveRow = null;
+
+function wordCount(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function withHeldPiece(text) {
+  return heldPiece ? [heldPiece.text, text].filter(Boolean).join(' ') : text;
+}
+
+function commitLiveSpeech(text) {
+  const row = commitLiveLine(text, {
+    timeLabel: heldPiece?.timeLabel ?? formatClock(elapsedMs()),
+    elapsedMs: elapsedMs(),
+    targetLanguage: selectedLanguage().code,
+  });
+  heldPiece = null;
+  lastLiveRow = row;
+  firstRowThisRecording ??= row;
+}
+
+// When recording ends, a waiting short piece still becomes a line, so nothing is lost.
+function commitHeldPiece() {
+  if (heldPiece) commitLiveSpeech(heldPiece.text);
+}
 
 function renderRecordButton() {
   const isActive = recorderState !== 'idle';
@@ -525,14 +624,41 @@ const transcriber = speechSupported
         };
         setStatus(messages[hearing], { live: true });
       },
-      onInterim: showLiveSentence,
-      onFinal(text) {
-        const row = commitLiveLine(text, {
-          timeLabel: formatClock(elapsedMs()),
-          elapsedMs: elapsedMs(),
-          targetLanguage: selectedLanguage().code,
-        });
-        firstRowThisRecording ??= row;
+      onInterim(text) {
+        // While Whisper writes the transcript, Chrome's words are only the live row's draft.
+        if (liveWhisper) {
+          liveDraft.setUnconfirmed(text, performance.now());
+          showDraft();
+          return;
+        }
+        showLiveSentence(withHeldPiece(text));
+      },
+      onFinal(text, { continuesPreviousWord = false } = {}) {
+        if (liveWhisper) {
+          liveDraft.addConfirmed(text, performance.now(), { continuesPreviousWord });
+          showDraft();
+          return;
+        }
+        // The rest of a word Chrome cut in two joins the end of the text before it.
+        if (continuesPreviousWord) {
+          if (heldPiece) {
+            heldPiece.text += text;
+            if (wordCount(heldPiece.text) >= MIN_WORDS_PER_LIVE_LINE) commitLiveSpeech(heldPiece.text);
+            else showLiveSentence(heldPiece.text);
+            return;
+          }
+          if (lastLiveRow?.isConnected) {
+            transcript.appendToLine(lastLiveRow, text);
+            return;
+          }
+        }
+        const combined = withHeldPiece(text);
+        if (wordCount(combined) < MIN_WORDS_PER_LIVE_LINE) {
+          heldPiece = { text: combined, timeLabel: heldPiece?.timeLabel ?? formatClock(elapsedMs()) };
+          showLiveSentence(combined);
+          return;
+        }
+        commitLiveSpeech(combined);
       },
       onError(message) {
         enterIdle();
@@ -543,36 +669,27 @@ const transcriber = speechSupported
         setStatus(message, { live: true, error: true });
       },
       onStopped() {
+        if (liveWhisper) {
+          const session = liveWhisper;
+          liveWhisper = null;
+          finishLiveWhisper(session);
+          return;
+        }
+        commitHeldPiece();
         showLiveSentence('');
         const firstRow = firstRowThisRecording;
         firstRowThisRecording = null;
-        const liveLines = firstRow ? transcript.linesFrom(firstRow) : [];
-        const recording = audioRecordingPromise;
-        audioRecordingPromise = null;
-        // Whisper runs first; the AI for titles loads only afterwards, so the two
-        // models never compete for the graphics chip and memory.
-        if (recording) {
-          makeCompleteTranscript(recording, liveLines, recordingStartMs);
-        } else if (liveLines.length > 0) {
-          organizeSections(liveLines);
-        }
+        if (firstRow) organizeSections(transcript.linesFrom(firstRow));
       },
     })
   : null;
 
 function startListening() {
+  heldPiece = null;
+  lastLiveRow = null;
   firstRowThisRecording = null;
   recordingStartMs = elapsedMs();
-  if (completeTranscriptSupported) {
-    audioRecordingPromise = startAudioRecording().catch((error) => {
-      logDebugEvent(`audio recording failed: ${error.message}`);
-      setCompleteStatus(
-        `Couldn't record audio for the complete transcript (${error.message}). The live transcript still works.`,
-        { error: true },
-      );
-      return null;
-    });
-  }
+  liveWhisper = completeTranscriptSupported ? startLiveWhisper() : null;
   recorderState = 'starting';
   renderRecordButton();
   setStatus('Starting the microphone…');
@@ -603,62 +720,371 @@ function describeWhisperProgress(progress) {
   return `Complete transcript: transcribing ${formatClock(progress.doneSeconds * 1000)} of ${formatClock(progress.totalSeconds * 1000)}…`;
 }
 
-// After Stop: Whisper re-transcribes the whole recording, its lines replace the
-// live ones (keeping flags), and then the recording is split into sections.
-// If anything goes wrong, the live lines are kept and organized instead.
-async function makeCompleteTranscript(recordingPromise, liveLines, startMs) {
-  const keepLiveVersion = (message) => {
-    if (message) setCompleteStatus(message, { error: true });
-    if (liveLines.length > 0) organizeSections(liveLines);
+// ---------- Live transcript from Whisper ----------
+
+// While recording, two recognizers listen. Chrome's is instant, so the
+// typewriter types its words in the live row as they are said, but it loses
+// whole stretches. Whisper's is complete but a few seconds behind: the
+// microphone's audio is cut into chunks at pauses (js/speech-chunks.js), and
+// each finished sentence Whisper writes rolls onto the paper, taking the same
+// words out of the live row (js/live-draft.js).
+
+const liveDraft = createLiveDraft();
+// The session whose words are in the live row, also while it finishes after Stop.
+let draftSession = null;
+// A chunk can finish several sentences at once; they go onto the paper one by
+// one, each after the paper has finished rolling up for the one before.
+const LINE_SPACING_MS = ROLL_MS + 300;
+
+// While Whisper loads (or once it is ready); null when it hasn't been asked to.
+let whisperWarming = null;
+
+// Gets Whisper loaded and run once before the first chunk needs it, which
+// otherwise held up the first sentences by several seconds.
+function warmUpWhisperEarly({ onlyIfDownloaded, onProgress }) {
+  const startedAt = performance.now();
+  whisperWarming = warmUpWhisper({ onlyIfDownloaded, onProgress })
+    .then((isWarm) => {
+      if (isWarm) logDebugEvent(`Whisper ready after ${((performance.now() - startedAt) / 1000).toFixed(1)} s`);
+      else whisperWarming = null;
+      return isWarm;
+    })
+    .catch((error) => {
+      logDebugEvent(`Whisper couldn't start early: ${error.message}`);
+      whisperWarming = null;
+      return false;
+    });
+}
+
+function startLiveWhisper() {
+  const session = {
+    startMs: recordingStartMs,
+    clearCountAtStart: clearCount,
+    audioFrames: [],
+    // When the first audio arrived (performance.now()), the start of Whisper's timestamps.
+    audioStartMs: null,
+    segments: [],
+    lines: [],
+    // Lines on the paper so far.
+    committed: 0,
+    rows: [],
+    spans: [],
+    commitTimer: null,
+    // A line Chrome missed, being typed in the live row before it rolls onto the paper.
+    typingLine: null,
+    ended: false,
+    transcribed: Promise.resolve(),
+    hasResult: false,
+    allCommitted: null,
   };
-  const recording = await recordingPromise;
-  if (!recording) {
-    keepLiveVersion();
+  session.chunker = createSpeechChunker({
+    sampleRate: CAPTURE_SAMPLE_RATE,
+    onChunk: (chunk) => transcribeLiveChunk(session, chunk),
+  });
+  session.capturing = startAudioCapture({
+    onAudio(samples) {
+      session.audioStartMs ??= performance.now() - (samples.length / CAPTURE_SAMPLE_RATE) * 1000;
+      session.audioFrames.push(samples);
+      session.chunker.push(samples);
+    },
+  }).catch((error) => {
+    logDebugEvent(`audio capture failed: ${error.message}`);
+    setCompleteStatus(`Couldn't capture audio for Whisper (${error.message}). Using Chrome's live recognition only.`, {
+      error: true,
+    });
+    if (liveWhisper === session) liveWhisper = null;
+    releaseDraft(session);
+    return null;
+  });
+  if (!whisperWarming) {
+    warmUpWhisperEarly({
+      onlyIfDownloaded: false,
+      onProgress(progress) {
+        if (!session.hasResult) setCompleteStatus(describeWhisperProgress(progress));
+      },
+    });
+  }
+  draftSession = session;
+  liveDraft.clear();
+  return session;
+}
+
+// Empties the live row, unless a newer recording already took it over.
+function releaseDraft(session) {
+  if (draftSession !== session) return;
+  draftSession = null;
+  liveDraft.clear();
+  showLiveSentence('');
+}
+
+function isSessionCurrent(session) {
+  return clearCount === session.clearCountAtStart;
+}
+
+function transcribeLiveChunk(session, chunk) {
+  const endSeconds = chunk.startSeconds + chunk.audio.length / CAPTURE_SAMPLE_RATE;
+  if (chunk.isSilent) {
+    logDebugEvent(`audio ${chunk.startSeconds.toFixed(1)}–${endSeconds.toFixed(1)} s: silence, skipped`);
     return;
   }
-  const clearCountAtStart = clearCount;
-  setCompleteStatus('Complete transcript: getting ready…');
-  try {
-    const audioBlob = await recording.stop();
-    logDebugEvent(`recorded ${Math.round(audioBlob.size / 1024)} KB of audio for Whisper`);
-    const { segments, device } = await transcribeRecording(audioBlob, (progress) => {
-      setCompleteStatus(describeWhisperProgress(progress));
-    });
-    logDebugEvent(`Whisper (${device}) returned ${segments.length} segments`);
-    if (clearCount !== clearCountAtStart) {
-      setCompleteStatus('');
-      return;
+  // Chunks are handled strictly in order, so the text grows in order.
+  session.transcribed = session.transcribed.then(async () => {
+    try {
+      const { segments } = await transcribeAudio(chunk.audio, (progress) => {
+        if (!session.hasResult && progress.type !== 'partial') setCompleteStatus(describeWhisperProgress(progress));
+      });
+      logDebugEvent(`Whisper, ${chunk.startSeconds.toFixed(1)}–${endSeconds.toFixed(1)} s: ${segments.map((segment) => segment.text.trim()).join(' ')}`);
+      if (!isSessionCurrent(session)) return;
+      if (!session.hasResult) {
+        session.hasResult = true;
+        setCompleteStatus('Whisper is writing the transcript, a few seconds behind the speaker.');
+      }
+      session.segments = appendChunkSegments(
+        session.segments,
+        segments.map((segment) => ({
+          ...segment,
+          startSeconds: segment.startSeconds + chunk.startSeconds,
+          endSeconds: segment.endSeconds + chunk.startSeconds,
+        })),
+      );
+      updateSessionLines(session);
+    } catch (error) {
+      logDebugEvent(`Whisper failed on ${chunk.startSeconds.toFixed(1)}–${endSeconds.toFixed(1)} s: ${error.message}`);
     }
+  });
+}
 
-    const lines = segmentsToLines(segments);
-    if (lines.length === 0) {
-      keepLiveVersion('Complete transcript: Whisper heard no speech in this recording, so the live version was kept.');
-      return;
-    }
-    const flaggedLineIndexes = new Set(
-      liveLines
-        .filter((line) => line.row.classList.contains('flagged'))
-        .map((line) => lineIndexAt(lines, (line.elapsedMs - startMs) / 1000)),
-    );
-    const targetLanguage = selectedLanguage().code;
-    const newRows = transcript.replaceLines(
-      liveLines.map((line) => line.row),
-      lines.map((line, index) => ({
-        text: line.text,
-        timeLabel: formatClock(startMs + line.startSeconds * 1000),
-        elapsedMs: startMs + line.endSeconds * 1000,
-        targetLanguage,
-        flagged: flaggedLineIndexes.has(index),
-      })),
-    );
-    setCompleteStatus(
-      `Complete transcript ready: Whisper's ${lines.length} sentence${lines.length === 1 ? '' : 's'} replaced the live version.`,
-    );
-    organizeSections(transcript.linesFrom(newRows[0]).slice(0, newRows.length));
-  } catch (error) {
-    logDebugEvent(`Whisper failed: ${error.message}`);
-    keepLiveVersion(`Couldn't make the complete transcript (${error.message}). The live version was kept.`);
+// The live row: a line the typewriter is finishing before it goes onto the
+// paper (see typeBeforeRolling), or else Chrome's draft.
+function showDraft() {
+  showLiveSentence(draftSession?.typingLine?.text ?? liveDraft.text);
+}
+
+// Words that went onto the paper (text, ending at line's end) leave the live
+// row. Returns false when they weren't in it, because Chrome missed them.
+function takeOffDraft(session, text, line) {
+  if (draftSession !== session || !text) return true;
+  const wasShown = liveDraft.addPaperLine(text, session.audioStartMs + line.endSeconds * 1000);
+  showDraft();
+  return wasShown;
+}
+
+function updateSessionLines(session) {
+  const lines = segmentsToLines(session.segments);
+  // A new chunk can continue the sentence that went onto the paper last.
+  const lastCommitted = session.committed - 1;
+  const grownLine = lastCommitted >= 0 ? lines[lastCommitted] : null;
+  if (grownLine && grownLine.text !== session.spans[lastCommitted].text) {
+    const oldWordCount = session.spans[lastCommitted].text.split(/\s+/).length;
+    transcript.setLineText(session.rows[lastCommitted], grownLine.text);
+    session.spans[lastCommitted] = grownLine;
+    takeOffDraft(session, grownLine.text.split(/\s+/).slice(oldWordCount).join(' '), grownLine);
   }
+  session.lines = lines;
+  commitFinishedLines(session);
+}
+
+// A sentence still being spoken goes onto the paper once it is this long, and
+// keeps growing there, instead of keeping the paper far behind the speaker.
+const MIN_WORDS_OF_UNFINISHED_LINE = 15;
+
+// The last line may still be growing; it is ready for the paper once a
+// sentence ends, it is long, a newer line starts, or the recording ends.
+function isLineFinished(session, index) {
+  const line = session.lines[index];
+  const isLast = index === session.lines.length - 1;
+  return (
+    !isLast ||
+    session.ended ||
+    /[.?!]["')\]]?$/.test(line.text) ||
+    line.text.split(/\s+/).length >= MIN_WORDS_OF_UNFINISHED_LINE
+  );
+}
+
+function addSessionRow(session, line) {
+  const row = transcript.addLine(line.text, {
+    timeLabel: formatClock(session.startMs + line.startSeconds * 1000),
+    elapsedMs: session.startMs + line.endSeconds * 1000,
+    targetLanguage: selectedLanguage().code,
+  });
+  session.rows.push(row);
+  session.spans.push(line);
+  session.committed++;
+  return row;
+}
+
+// Rolls the next finished line onto the paper, then the one after it a moment later.
+function commitFinishedLines(session) {
+  if (session.commitTimer || session.typingLine) return;
+  if (session.committed >= session.lines.length || !isLineFinished(session, session.committed)) {
+    if (session.ended && session.committed === session.lines.length) session.allCommitted?.();
+    return;
+  }
+  const line = session.lines[session.committed];
+  // Chrome shows words a moment after Whisper may have finished them: when the
+  // live row has only the start of this line, the typewriter types the rest
+  // after it, rather than erasing what is there.
+  const restOfLine = draftSession === session ? liveDraft.restOfLine(line.text) : null;
+  if (restOfLine) {
+    logDebugEvent(`Chrome is behind, so the typewriter finishes the line: …${restOfLine}`);
+    typeBeforeRolling(session, line, `${liveDraft.text} ${restOfLine}`);
+    return;
+  }
+  // A line Chrome missed is typed first only while the live row is empty (Chrome
+  // is quiet or hasn't started): typing it in front of Chrome's words meant
+  // erasing and retyping the whole live row, which looked jumpy.
+  if (takeOffDraft(session, line.text, line) || liveDraft.text) {
+    rollOntoPaper(session, line);
+  } else {
+    logDebugEvent(`Chrome missed this line, so the typewriter types it: ${line.text}`);
+    typeBeforeRolling(session, line, line.text, { isOffDraft: true });
+  }
+}
+
+function rollOntoPaper(session, line) {
+  addSessionRow(session, line);
+  typewriter.lineFeed();
+  rollPaperToLiveRow();
+  session.commitTimer = setTimeout(() => {
+    session.commitTimer = null;
+    commitFinishedLines(session);
+  }, LINE_SPACING_MS);
+}
+
+// The typewriter finishes a line in the live row (typedText: what the row
+// shows once it is done) before it rolls onto the paper, like every other line:
+// a line Chrome missed (while its recognition starts, or when it stalls), or
+// one whose end Chrome hasn't shown yet. isOffDraft: its words already left
+// Chrome's draft.
+async function typeBeforeRolling(session, line, typedText, { isOffDraft = false } = {}) {
+  const typingLine = { text: typedText };
+  session.typingLine = typingLine;
+  if (isOffDraft) showDraft();
+  else takeOffDraft(session, line.text, line);
+  // Typing normally finishes in well under a second; don't wait forever if animation stops.
+  await Promise.race([liveOriginal.whenTyped(typedText.length), delay(1500 + typedText.length * 25)]);
+  if (session.typingLine !== typingLine) return; // cleared, or the recording finished without it
+  session.typingLine = null;
+  showDraft();
+  rollOntoPaper(session, line);
+}
+
+function joinAudio(frames) {
+  const audio = new Float32Array(frames.reduce((length, frame) => length + frame.length, 0));
+  let offset = 0;
+  for (const frame of frames) {
+    audio.set(frame, offset);
+    offset += frame.length;
+  }
+  return audio;
+}
+
+// After Stop: Whisper transcribes the last chunk and its lines roll onto the
+// paper; then speakers are told apart and the recording is split into sections.
+async function finishLiveWhisper(session) {
+  const capture = await session.capturing;
+  capture?.stop();
+  session.chunker.flush();
+  setCompleteStatus('Whisper is finishing the last sentence…');
+  await session.transcribed;
+  if (!isSessionCurrent(session)) {
+    releaseDraft(session);
+    return;
+  }
+  session.ended = true;
+  const allCommitted = new Promise((resolve) => {
+    session.allCommitted = resolve;
+  });
+  updateSessionLines(session);
+  await Promise.race([allCommitted, delay((LINE_SPACING_MS + 1500) * (session.lines.length - session.committed + 1))]);
+  clearTimeout(session.commitTimer);
+  session.commitTimer = null;
+  session.typingLine = null;
+  for (const line of session.lines.slice(session.committed)) addSessionRow(session, line);
+  releaseDraft(session);
+  if (session.rows.length === 0) {
+    setCompleteStatus('Whisper heard no speech in this recording.', { error: !session.hasResult });
+    return;
+  }
+  const summary = `Transcript ready: ${session.rows.length} sentence${session.rows.length === 1 ? '' : 's'} from Whisper.`;
+  setCompleteStatus(summary);
+  const speakerNames = await identifySpeakers(joinAudio(session.audioFrames), session.rows, session.spans, 'Transcript');
+  if (!isSessionCurrent(session)) return;
+  setCompleteStatus(describeSpeakersFound(summary, speakerNames));
+  organizeSections(transcript.linesFrom(session.rows[0]).slice(0, session.rows.length));
+}
+
+// ---------- Speakers ----------
+
+// Tells the speakers of the given rows apart by voice and labels them Speaker 1,
+// Speaker 2, …. spans: each row's place in the audio ({ startSeconds,
+// endSeconds }). Resolves to the names found, or null.
+async function identifySpeakers(audio, rows, spans, sourceName) {
+  if (rows.length === 0) return null;
+  const clearCountAtStart = clearCount;
+  setCompleteStatus(`${sourceName}: telling speakers apart…`);
+  try {
+    const { embeddings, device } = await embedSpeakers(
+      audio,
+      spans.map(({ startSeconds, endSeconds }) => ({ startSeconds, endSeconds })),
+      (progress) => {
+        if (progress.type === 'loading') {
+          setCompleteStatus(
+            `${sourceName}: downloading the speaker model (first time only, about 26 MB)… ${Math.round(progress.fraction * 100)}%`,
+          );
+        } else if (progress.type === 'speaker-progress') {
+          setCompleteStatus(`${sourceName}: telling speakers apart… ${progress.done} of ${progress.total} sentences`);
+        }
+      },
+    );
+    if (clearCount !== clearCountAtStart) return null;
+    const recording = { rows, embeddings };
+    labeledRecordings.push(recording);
+    const names = labelSpeakers(recording);
+    logDebugEvent(`speakers (${device}): ${names.join(', ')}`);
+    return names;
+  } catch (error) {
+    logDebugEvent(`telling speakers apart failed: ${error.message}`);
+    return null;
+  }
+}
+
+// Recordings whose voices have been fingerprinted, so changing "People speaking"
+// can relabel them at once without processing the audio again.
+let labeledRecordings = [];
+
+function chosenSpeakerCount() {
+  return speakerCountSelect.value === 'auto' ? null : Number(speakerCountSelect.value);
+}
+
+// Groups a recording's lines by voice and shows a tag for each speaker. Returns the names.
+function labelSpeakers({ rows, embeddings }) {
+  const round = (numbers) => numbers.map((number) => number.toFixed(2)).join(', ');
+  const speakers = groupSpeakers(embeddings, {
+    speakerCount: chosenSpeakerCount(),
+    onDetails({ smallGroups, mergeSimilarities, closestUnmerged, clusterLineCounts, clusterSimilarities }) {
+      logDebugEvent(
+        `voices: ${embeddings.length} lines → ${smallGroups} small groups; merges at [${round(mergeSimilarities)}]` +
+          `${closestUnmerged === null ? '' : `; stopped at ${closestUnmerged.toFixed(2)}`}; speakers have ${clusterLineCounts.join(' / ')} lines;` +
+          ` speaker-to-speaker similarity [${round(clusterSimilarities)}]`,
+      );
+    },
+  });
+  const names = speakerNames(speakers);
+  transcript.assignSpeakers(rows, speakers, names);
+  return names;
+}
+
+speakerCountSelect.addEventListener('change', () => {
+  labeledRecordings = labeledRecordings.filter(({ rows }) => rows.some((row) => row.isConnected));
+  const allNames = labeledRecordings.map((recording) => labelSpeakers(recording));
+  if (allNames.length > 0) setCompleteStatus(`Speakers relabeled: ${allNames.map((names) => names.join(', ')).join(' / ')}.`);
+});
+
+function describeSpeakersFound(summary, names) {
+  if (!names) return `${summary} (Couldn't tell speakers apart.)`;
+  if (names.length === 1) return `${summary} One speaker. Click the name to rename them.`;
+  return `${summary} ${names.length} speakers. Click a name to rename them.`;
 }
 
 // ---------- Uploading a recording ----------
@@ -706,7 +1132,11 @@ async function transcribeUploadedFile(file) {
     timeLabel: formatClock(line.startSeconds * 1000),
     elapsedMs: line.endSeconds * 1000,
     targetLanguage,
+    startSeconds: line.startSeconds,
+    endSeconds: line.endSeconds,
   });
+  // Where each added row is in the audio, for telling speakers apart.
+  const uploadSpans = [];
 
   async function typeQueuedLines() {
     isTypingUpload = true;
@@ -716,11 +1146,13 @@ async function transcribeUploadedFile(file) {
       const typeIt = lineQueue.length < TYPE_LINES_WHEN_FEWER_THAN && !document.hidden;
       if (typeIt) {
         showLiveSentence(line.text);
-        await liveOriginal.whenTyped();
+        // If animation frames stop (some browsers pause them), don't wait forever.
+        await Promise.race([liveOriginal.whenTyped(), delay(1500 + line.text.length * 25)]);
         await delay(120);
       }
       if (wasCleared()) break;
       uploadRows.push(commitLiveLine(line.text, line));
+      uploadSpans.push(line);
     }
     isTypingUpload = false;
     showLiveSentence('');
@@ -739,7 +1171,7 @@ async function transcribeUploadedFile(file) {
   }
 
   try {
-    const { device } = await transcribeRecording(file, (progress) => {
+    const { device, audio } = await transcribeRecording(file, (progress) => {
       if (wasCleared()) return;
       if (progress.type === 'retrying') {
         // Whisper starts over on the processor, so its partial lines are taken back.
@@ -747,6 +1179,7 @@ async function transcribeUploadedFile(file) {
         segmentsSoFar.length = 0;
         linesQueued = 0;
         transcript.removeLines(uploadRows.splice(0));
+        uploadSpans.length = 0;
       }
       if (progress.type === 'partial') {
         segmentsSoFar.push(...progress.segments);
@@ -765,7 +1198,10 @@ async function transcribeUploadedFile(file) {
       setCompleteStatus(`${file.name}: Whisper heard no speech in this file.`, { error: true });
       return;
     }
-    setCompleteStatus(`${file.name}: done, ${uploadRows.length} sentence${uploadRows.length === 1 ? '' : 's'}.`);
+    const summary = `${file.name}: done, ${uploadRows.length} sentence${uploadRows.length === 1 ? '' : 's'}.`;
+    const speakerNames = await identifySpeakers(audio, uploadRows, uploadSpans, file.name);
+    if (wasCleared()) return;
+    setCompleteStatus(describeSpeakersFound(summary, speakerNames));
     organizeSections(transcript.linesFrom(uploadRows[0]).slice(0, uploadRows.length));
   } catch (error) {
     logDebugEvent(`Upload failed: ${error.message}`);
@@ -979,6 +1415,20 @@ clearBtn.addEventListener('click', () => {
   if (transcript.hasContent() && !confirm('Clear the whole transcript, including your edits?')) return;
   transcript.clear();
   clearCount++;
+  if (liveWhisper) {
+    Object.assign(liveWhisper, {
+      clearCountAtStart: clearCount,
+      segments: [],
+      lines: [],
+      committed: 0,
+      rows: [],
+      spans: [],
+      typingLine: null,
+    });
+    liveDraft.clear();
+    showLiveSentence('');
+  }
+  labeledRecordings = [];
   firstRowThisRecording = null;
   elapsedBeforePauseMs = 0;
   if (listeningSinceMs !== null) listeningSinceMs = Date.now();
@@ -1019,3 +1469,5 @@ renderTranscriptState();
 checkBrowserSupport();
 renderUploadAvailability();
 describeTranslationReadiness();
+// A model downloaded on an earlier visit is loaded now, so it is ready by the time Start is pressed.
+if (completeTranscriptSupported) warmUpWhisperEarly({ onlyIfDownloaded: true });

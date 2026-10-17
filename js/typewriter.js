@@ -3,13 +3,20 @@
 // are typed. Animation only; it makes no sound, since it runs in lectures.
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+// A line feed: the platen turns and the paper rolls up, slowly and evenly,
+// like a scroll (starting and stopping gently).
+export const LINE_FEED_MS = 1200;
+const LINE_FEED_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)';
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---------- Typed text ----------
 
-// A normal typing pace; when far behind the speech, typing speeds up to catch up.
-const BASE_CHARACTERS_PER_SECOND = 40;
-const CATCH_UP_PER_WAITING_CHARACTER = 1.2;
+// A little faster than speech, so typing keeps up; when a lot arrives at once,
+// typing speeds up and spreads it over a second or two, so it still looks typed
+// rather than appearing all at once.
+const BASE_CHARACTERS_PER_SECOND = 20;
+const CATCH_UP_PER_WAITING_CHARACTER = 1;
 
 function commonPrefixLength(a, b) {
   let length = 0;
@@ -26,7 +33,7 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
   let frameId = null;
   let lastFrameTime = 0;
   let characterBudget = 0;
-  // Promises waiting for the current text to be fully typed.
+  // Promises waiting for text to be typed: [{ length, resolve }].
   let waitingForTyped = [];
 
   function render() {
@@ -34,9 +41,11 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
   }
 
   function settleIfTyped() {
-    if (shown !== target) return;
-    for (const resolve of waitingForTyped) resolve();
-    waitingForTyped = [];
+    waitingForTyped = waitingForTyped.filter(({ length, resolve }) => {
+      const isTyped = shown.length >= Math.min(length, target.length);
+      if (isTyped) resolve();
+      return !isTyped;
+    });
   }
 
   function typeNextCharacters(now) {
@@ -71,7 +80,14 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
         return;
       }
       if (!target.startsWith(shown)) {
-        shown = shown.slice(0, commonPrefixLength(shown, target));
+        const sharedStart = commonPrefixLength(shown, target);
+        // When the beginning was taken away (it moved onto the paper), keep the
+        // rest as shown instead of erasing and retyping it.
+        let keptFrom = -1;
+        for (let i = 1; sharedStart === 0 && i < shown.length && keptFrom < 0; i++) {
+          if (target.startsWith(shown.slice(i))) keptFrom = i;
+        }
+        shown = keptFrom > 0 ? shown.slice(keptFrom) : shown.slice(0, sharedStart);
         render();
       }
       if (frameId === null && shown.length < target.length) {
@@ -89,10 +105,11 @@ export function createTypedText(element, { onCharacterTyped = () => {} } = {}) {
       render();
       settleIfTyped();
     },
-    // Resolves once everything set so far has appeared (or the text was cleared).
-    whenTyped() {
+    // Resolves once the first `length` characters (by default, everything set
+    // so far) have appeared, or the text became shorter than that.
+    whenTyped(length = Infinity) {
       return new Promise((resolve) => {
-        waitingForTyped.push(resolve);
+        waitingForTyped.push({ length, resolve });
         settleIfTyped();
       });
     },
@@ -314,8 +331,8 @@ export function createTypewriterMachine(svg, { getStrikePoint = () => null, onIm
     lineFeed() {
       if (prefersReducedMotion.matches) return;
       platenRidges.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-8px)' }], {
-        duration: 450,
-        easing: 'cubic-bezier(0.25, 0.8, 0.35, 1)',
+        duration: LINE_FEED_MS,
+        easing: LINE_FEED_EASING,
       });
       bell.animate([{ opacity: 0.25 }, { opacity: 1, offset: 0.15 }, { opacity: 0.25 }], { duration: 600 });
     },

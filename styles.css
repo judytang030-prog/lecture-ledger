@@ -143,6 +143,11 @@ body {
   min-width: 200px;
 }
 
+.field-narrow {
+  flex: 0 0 auto;
+  min-width: 120px;
+}
+
 .field label {
   display: block;
   font-family: var(--font-typed);
@@ -418,7 +423,7 @@ p.status-line:empty {
 .columns-head,
 .row {
   display: grid;
-  grid-template-columns: 64px 1fr 1fr;
+  grid-template-columns: 84px 1fr 1fr;
   gap: 20px;
 }
 
@@ -665,6 +670,10 @@ p.status-line:empty {
   color: var(--ink-soft);
 }
 
+.interim-row .live-tail {
+  opacity: 0.6;
+}
+
 .interim-row .original:empty::before {
   content: attr(data-placeholder);
   color: var(--ink-soft);
@@ -879,6 +888,50 @@ body.is-typing .interim-row .original::after {
   font-size: 0.72rem;
 }
 
+/* Who is speaking: a tag at the start of each run of lines by one person,
+   in muted ink colours. Click it to rename that speaker everywhere. */
+.speaker-tag {
+  --speaker-color: #8a3a2c;
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--speaker-color);
+  color: var(--paper);
+  font-family: var(--font-typed);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+.speaker-tag[data-color='1'] {
+  --speaker-color: #2f6b6e;
+}
+
+.speaker-tag[data-color='2'] {
+  --speaker-color: #6a4a78;
+}
+
+.speaker-tag[data-color='3'] {
+  --speaker-color: #66652c;
+}
+
+.speaker-tag[data-color='4'] {
+  --speaker-color: #34507a;
+}
+
+.speaker-tag[data-color='5'] {
+  --speaker-color: #7a5732;
+}
+
+.speaker-tag[contenteditable]:hover,
+.speaker-tag[contenteditable]:focus {
+  background: var(--speaker-color);
+  filter: brightness(1.15);
+}
+
 /* Where an uploaded recording's transcript begins: its file name between rules. */
 .file-divider {
   display: flex;
@@ -1028,7 +1081,7 @@ body.is-dropping-file .page {
 
   .columns-head,
   .row {
-    grid-template-columns: 48px 1fr 1fr;
+    grid-template-columns: 70px 1fr 1fr;
   }
 
   .row {

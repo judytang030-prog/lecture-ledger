@@ -68,7 +68,79 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
 
   function changed() {
     renderOutline();
+    renderSpeakerTags();
     onChange();
+  }
+
+  // ---------- Speakers ----------
+
+  // Names keyed by "<recording>:<speaker number>": each recording or upload
+  // numbers its own speakers.
+  const speakerNames = new Map();
+  let speakerRecordingCount = 0;
+  const SPEAKER_COLORS = 6;
+
+  function createSpeakerTag() {
+    const tag = document.createElement('span');
+    tag.className = 'speaker-tag';
+    tag.title = 'Click to rename this speaker everywhere';
+    makeEditable(tag, (name) => renameSpeaker(tag.dataset.speakerKey, name));
+    return tag;
+  }
+
+  // Renaming a speaker to the name of another speaker in the same recording
+  // merges them: their lines become one person's (for when one voice was split).
+  function renameSpeaker(key, name) {
+    const recording = key.split(':')[0];
+    const sameName = [...speakerNames].find(
+      ([otherKey, otherName]) =>
+        otherKey !== key && otherKey.startsWith(`${recording}:`) && otherName.toLowerCase() === name.toLowerCase(),
+    );
+    if (sameName) {
+      const [otherKey] = sameName;
+      const otherColor = rows().find((row) => row.dataset.speaker === otherKey)?.dataset.speakerColor;
+      for (const row of rows()) {
+        if (row.dataset.speaker !== key) continue;
+        row.dataset.speaker = otherKey;
+        if (otherColor !== undefined) row.dataset.speakerColor = otherColor;
+      }
+      speakerNames.delete(key);
+    } else {
+      speakerNames.set(key, name);
+    }
+    renderSpeakerTags();
+  }
+
+  // A tag with the speaker's name starts each run of lines by the same person.
+  function renderSpeakerTags() {
+    let previousKey = null;
+    for (const row of rows()) {
+      const key = row.dataset.speaker ?? null;
+      let tag = row.querySelector('.speaker-tag');
+      if (key !== null && key !== previousKey) {
+        if (!tag) {
+          tag = createSpeakerTag();
+          row.querySelector('.time').after(tag);
+        }
+        tag.dataset.speakerKey = key;
+        tag.dataset.color = row.dataset.speakerColor;
+        if (document.activeElement !== tag) tag.textContent = speakerNames.get(key);
+      } else {
+        tag?.remove();
+      }
+      previousKey = key;
+    }
+  }
+
+  // speakers: a speaker number for each row; names: indexed by speaker number.
+  function assignSpeakers(rowsToLabel, speakers, names) {
+    speakerRecordingCount++;
+    rowsToLabel.forEach((row, index) => {
+      row.dataset.speaker = `${speakerRecordingCount}:${speakers[index]}`;
+      row.dataset.speakerColor = String(speakers[index] % SPEAKER_COLORS);
+    });
+    names.forEach((name, speaker) => speakerNames.set(`${speakerRecordingCount}:${speaker}`, name));
+    renderSpeakerTags();
   }
 
   // ---------- Translation ----------
@@ -162,7 +234,7 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
 
   // provisionalTranslation is the live translation shown while the sentence was
   // still being spoken; it stays (greyed) until the final translation arrives.
-  function addLine(text, { timeLabel, elapsedMs, targetLanguage, provisionalTranslation, flagged, insertBefore }) {
+  function addLine(text, { timeLabel, elapsedMs, targetLanguage, provisionalTranslation }) {
     const row = document.createElement('div');
     row.className = 'row';
     row.dataset.targetLanguage = targetLanguage;
@@ -197,59 +269,12 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
     });
 
     row.append(side, original, translation);
-    if (flagged) toggleFlag(row);
-    if (insertBefore) {
-      insertBefore.before(row);
-    } else {
-      rowsEl.appendChild(row);
-    }
+    rowsEl.appendChild(row);
     changed();
     translateRow(row, provisionalTranslation || undefined);
     return row;
   }
 
-  // Swaps the live lines of one recording for the complete ones, in the same place.
-  // Returns the new rows.
-  function replaceLines(oldRows, newLines) {
-    const stillThere = oldRows.filter((row) => row.isConnected);
-    const anchor = stillThere[0] ?? null;
-    // Automatic headings among the old lines described the old version; the new
-    // lines get organized again. Headings the user named are kept, and later put
-    // back before the new line at the same point in time.
-    const namedHeadings = [];
-    if (anchor) {
-      const previous = anchor.previousElementSibling;
-      let element = previous?.classList.contains('section') ? previous : anchor;
-      const end = stillThere.at(-1).nextElementSibling;
-      while (element && element !== end) {
-        const next = element.nextElementSibling;
-        if (element.classList.contains('section')) {
-          if (element.querySelector('.section-title').dataset.editedByUser) {
-            // The heading followed the old line that ended at afterMs, so it goes
-            // before the first new line that ends later than that.
-            const oldRowBefore = stillThere.findLast(
-              (row) => row.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING,
-            );
-            namedHeadings.push({ heading: element, afterMs: Number(oldRowBefore?.dataset.elapsedMs ?? -Infinity) });
-          }
-          element.remove();
-        }
-        element = next;
-      }
-    }
-    const newRows = newLines.map((line) => addLine(line.text, { ...line, insertBefore: anchor }));
-    for (const row of stillThere) row.remove();
-    for (const { heading, afterMs } of namedHeadings) {
-      const target = newRows.find((row) => Number(row.dataset.elapsedMs) > afterMs) ?? newRows.at(-1)?.nextElementSibling;
-      if (target) {
-        target.before(heading);
-      } else {
-        rowsEl.appendChild(heading);
-      }
-    }
-    changed();
-    return newRows;
-  }
 
   // A labelled line marking where an uploaded recording's transcript begins.
   function addDivider(label) {
@@ -264,6 +289,21 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
   function removeLines(rowsToRemove) {
     for (const row of rowsToRemove) row.remove();
     changed();
+  }
+
+  // Replaces a line's text and translates it again.
+  // The old translation stays (dimmed) until the new one is ready, so a line
+  // that grows doesn't flash "Translating…".
+  function setLineText(row, text) {
+    row.querySelector('.original').textContent = text;
+    const cell = row.querySelector('.translation');
+    const currentTranslation = cell.classList.contains('failed') ? '' : cell.textContent;
+    translateRow(row, currentTranslation || 'Translating…');
+  }
+
+  // Adds text to the end of a line (with no space: it finishes a cut-off word).
+  function appendToLine(row, text) {
+    setLineText(row, row.querySelector('.original').textContent + text);
   }
 
   // The sentences from firstRow (or from the start) onward, for automatic organizing.
@@ -294,9 +334,11 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
     },
     addDivider,
     addPendingSectionBefore,
+    appendToLine,
+    assignSpeakers,
+    setLineText,
     linesFrom,
     removeLines,
-    replaceLines,
     hasContent: () => rowsEl.children.length > 0,
     hasLines: () => rows().length > 0,
     hasSections: () => sections().length > 0,
@@ -306,6 +348,7 @@ export function createTranscript({ rowsEl, outlineEl, outlineListEl, translateTe
     },
     clear() {
       rowsEl.replaceChildren();
+      speakerNames.clear();
       changed();
     },
   };

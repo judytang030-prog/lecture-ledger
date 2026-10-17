@@ -1,10 +1,13 @@
-// Records the microphone while Chrome transcribes live, so Whisper can make a
-// complete transcript of the same audio after Stop.
-export function isRecordingSupported() {
-  return Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+// Captures the microphone as raw 16 kHz audio while recording, so Whisper can
+// transcribe it a few seconds at a time (js/speech-chunks.js decides where to cut).
+export const CAPTURE_SAMPLE_RATE = 16000;
+
+export function isAudioCaptureSupported() {
+  return Boolean(navigator.mediaDevices?.getUserMedia && window.AudioContext && window.AudioWorkletNode);
 }
 
-export async function startAudioRecording() {
+// Calls onAudio(Float32Array) with each 0.1 s of audio. Resolves to { stop() }.
+export async function startAudioCapture({ onAudio }) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: 1,
@@ -15,28 +18,22 @@ export async function startAudioRecording() {
       autoGainControl: true,
     },
   });
-  const recorder = new MediaRecorder(stream);
-  const audioParts = [];
-  recorder.addEventListener('dataavailable', (event) => {
-    if (event.data.size > 0) audioParts.push(event.data);
-  });
-  // Collect data every second so a long lecture never sits in one huge buffer.
-  recorder.start(1000);
+  // The browser resamples the microphone to the context's rate, which is what Whisper expects.
+  const context = new AudioContext({ sampleRate: CAPTURE_SAMPLE_RATE });
+  await context.audioWorklet.addModule(new URL('./pcm-capture-worklet.js', import.meta.url));
+  const source = context.createMediaStreamSource(stream);
+  const capture = new AudioWorkletNode(context, 'pcm-capture');
+  capture.port.onmessage = (event) => onAudio(event.data);
+  // A silent output keeps the audio graph running without playing anything.
+  const mute = context.createGain();
+  mute.gain.value = 0;
+  source.connect(capture).connect(mute).connect(context.destination);
 
   return {
-    // Resolves to the whole recording as one audio Blob.
     stop() {
-      return new Promise((resolve) => {
-        recorder.addEventListener(
-          'stop',
-          () => {
-            for (const track of stream.getTracks()) track.stop();
-            resolve(new Blob(audioParts, { type: recorder.mimeType }));
-          },
-          { once: true },
-        );
-        recorder.stop();
-      });
+      capture.port.onmessage = null;
+      for (const track of stream.getTracks()) track.stop();
+      context.close();
     },
   };
 }

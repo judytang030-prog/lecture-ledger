@@ -54,10 +54,14 @@ export function splitForTranslation(text) {
 // Languages written without spaces between sentences and clauses.
 const JOINED_WITHOUT_SPACES = new Set(['zh', 'zh-Hant', 'ja']);
 
+export function joinTranslatedPieces(translatedPieces, targetCode) {
+  return translatedPieces.join(JOINED_WITHOUT_SPACES.has(targetCode) ? '' : ' ');
+}
+
 export async function translateInPieces(translator, text, targetCode) {
   const translatedPieces = [];
   for (const piece of splitForTranslation(text)) {
     translatedPieces.push((await translator.translate(piece)).trim());
   }
-  return translatedPieces.join(JOINED_WITHOUT_SPACES.has(targetCode) ? '' : ' ');
+  return joinTranslatedPieces(translatedPieces, targetCode);
 }

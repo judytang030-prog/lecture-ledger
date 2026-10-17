@@ -30,35 +30,66 @@ function normalizedWords(text) {
     .filter(Boolean);
 }
 
-// Chrome sometimes confirms a sentence with its last few words missing, even
-// though they were shown live a moment earlier. If the confirmed text ends partway
-// through the live text, and the missing words did not just move into the next
-// result (followingText), add them back.
+function findWords(haystack, needle, { fromEnd = false } = {}) {
+  const positions = [];
+  for (let i = 0; i + needle.length <= haystack.length; i++) {
+    if (needle.every((word, offset) => haystack[i + offset] === word)) positions.push(i);
+  }
+  return fromEnd ? positions.at(-1) ?? -1 : positions[0] ?? -1;
+}
+
+// Chrome sometimes confirms a sentence with words missing at its start or end,
+// even though they were shown live a moment earlier. The confirmed text is
+// lined up with the longest live text by its first and last one or two words;
+// live words before it are added back at the start, and live words after it
+// at the end, unless those just moved into the next result (followingText).
 export function recoverDroppedWords(liveText, confirmedText, followingText = '') {
   const liveWords = normalizedWords(liveText);
   const confirmedWords = normalizedWords(confirmedText);
   if (confirmedWords.length === 0 || confirmedWords.length >= liveWords.length) return confirmedText;
+  const originalLiveWords = liveText.trim().split(/\s+/);
+  let recovered = confirmedText;
 
-  // Find where the confirmed text ends inside the live text, by its last one or two words.
-  const anchor = confirmedWords.slice(-2);
-  let anchorEnd = -1;
-  for (let i = liveWords.length - anchor.length; i >= 0; i--) {
-    if (anchor.every((word, offset) => liveWords[i + offset] === word)) {
-      anchorEnd = i + anchor.length;
-      break;
+  const startsAt = findWords(liveWords, confirmedWords.slice(0, 2));
+  if (startsAt > 0) {
+    recovered = `${originalLiveWords.slice(0, startsAt).join(' ')} ${recovered}`;
+  }
+
+  const endAnchor = confirmedWords.slice(-2);
+  const endsAt = findWords(liveWords, endAnchor, { fromEnd: true });
+  if (endsAt >= 0 && endsAt + endAnchor.length < liveWords.length) {
+    const droppedEnd = liveWords.slice(endsAt + endAnchor.length);
+    const followingWords = normalizedWords(followingText);
+    const movedToNextResult = droppedEnd.every((word, i) => followingWords[i] === word);
+    if (!movedToNextResult) {
+      recovered = `${recovered} ${originalLiveWords.slice(originalLiveWords.length - droppedEnd.length).join(' ')}`;
     }
   }
-  if (anchorEnd < 0 || anchorEnd >= liveWords.length) return confirmedText;
-
-  const droppedWords = liveWords.slice(anchorEnd);
-  const followingWords = normalizedWords(followingText);
-  const movedToNextResult = droppedWords.every((word, i) => followingWords[i] === word);
-  if (movedToNextResult) return confirmedText;
-
-  const originalLiveWords = liveText.trim().split(/\s+/);
-  const droppedText = originalLiveWords.slice(originalLiveWords.length - droppedWords.length).join(' ');
-  return `${confirmedText} ${droppedText}`;
+  return recovered;
 }
+
+function shareOfWordsIn(words, otherText) {
+  const otherWords = new Set(normalizedWords(otherText));
+  return words.filter((word) => otherWords.has(word)).length / words.length;
+}
+
+// Chrome sometimes confirms something completely different from what it had
+// shown live ("can you say what you want to say" became "try my best but their
+// days"), dropping the live words. They count as lost when they barely appear
+// in the confirmed text and weren't already saved in the lines just before
+// (Chrome also moves words between results).
+export function isLostLiveText(liveText, confirmedText, recentlySavedText) {
+  const liveWords = normalizedWords(liveText);
+  if (liveWords.length < 3) return false;
+  return shareOfWordsIn(liveWords, confirmedText) < 0.3 && shareOfWordsIn(liveWords, recentlySavedText) < 0.7;
+}
+
+// A gap this long between results while speech is heard is noted in the log.
+const GAP_MS = 3000;
+
+// If speech is heard but Chrome gives no results for this long, it has stalled
+// (seen for 30+ seconds at a time), so recognition is restarted.
+const STALL_MS = 7000;
 
 export function createLiveTranscriber({
   speechCode,
@@ -87,10 +118,25 @@ export function createLiveTranscriber({
   // results were already saved, and the longest text each one showed live.
   let savedResultIndexes = new Set();
   let longestLiveTextByIndex = [];
+  // The last few saved lines, to tell lost live words from words that moved.
+  let recentlySaved = [];
+  let lastResultAt = 0;
+  // Whether this session has given any words yet, to log how long that took.
+  let hasGivenWords = false;
+  let isHearingSpeech = false;
+  let stallCheck = null;
+
+  function restartIfStalled() {
+    if (!wantsToListen || !isHearingSpeech || performance.now() - lastResultAt < STALL_MS) return;
+    onDebugEvent(`no results for ${STALL_MS / 1000} s while hearing speech: restarting recognition`);
+    lastResultAt = performance.now();
+    recognition.stop(); // onend saves anything unconfirmed and starts again
+  }
 
   function fail(message) {
     wantsToListen = false;
     clearTimeout(slowStartTimer);
+    clearInterval(stallCheck);
     onError(message);
   }
 
@@ -105,8 +151,10 @@ export function createLiveTranscriber({
 
   recognition.onstart = () => {
     onDebugEvent('start');
+    hasGivenWords = false;
     savedResultIndexes = new Set();
     longestLiveTextByIndex = [];
+    lastResultAt = performance.now();
     clearTimeout(slowStartTimer);
     if (!hasStarted) {
       hasStarted = true;
@@ -117,9 +165,16 @@ export function createLiveTranscriber({
   // Lets the page show whether the recognizer hears anything, which separates
   // "the mic picks up nothing" from "it hears sound but can't make out words".
   recognition.onsoundstart = () => onHearingChange('sound');
-  recognition.onspeechstart = () => onHearingChange('speech');
+  recognition.onspeechstart = () => {
+    onDebugEvent('hearing speech');
+    isHearingSpeech = true;
+    onHearingChange('speech');
+  };
   recognition.onsoundend = () => onHearingChange('silence');
-  recognition.onspeechend = () => onDebugEvent('speech ended');
+  recognition.onspeechend = () => {
+    isHearingSpeech = false;
+    onDebugEvent('speech ended');
+  };
   recognition.onnomatch = () => onDebugEvent('no match (heard speech but could not recognize it)');
 
   // Looks at every result each time, not only the ones Chrome says changed, so a
@@ -141,10 +196,26 @@ export function createLiveTranscriber({
       savedResultIndexes.add(i);
       const liveText = longestLiveTextByIndex[i] ?? '';
       const savedText = recoverDroppedWords(liveText, text, textAt(i + 1));
+      // Each later result normally starts with a space; one that doesn't is the
+      // rest of a word Chrome cut in two ("jour" + "ney").
+      const keepsLostLiveText = isLostLiveText(liveText, savedText, recentlySaved.join(' '));
+      if (keepsLostLiveText) {
+        onDebugEvent(`  kept live text Chrome replaced: ${liveText}`);
+        onFinal(liveText);
+        recentlySaved = [...recentlySaved, liveText].slice(-3);
+      }
+      // After a kept line, the confirmed text starts fresh rather than finishing a word.
+      const continuesPreviousWord = !keepsLostLiveText && i > 0 && /^[a-z]/.test(results[i][0].transcript);
       onDebugEvent(
-        savedText === text ? `confirmed #${i}: ${text}` : `confirmed #${i} (restored dropped words): ${savedText}`,
+        `confirmed #${i}${savedText === text ? '' : ' (restored dropped words)'}${continuesPreviousWord ? ' (continues the previous word)' : ''}: ${savedText}`,
       );
-      if (savedText) onFinal(savedText);
+      if (normalizedWords(liveText).length > normalizedWords(savedText).length) {
+        onDebugEvent(`  live text had been: ${liveText}`);
+      }
+      if (savedText) {
+        onFinal(savedText, { continuesPreviousWord });
+        recentlySaved = [...recentlySaved, savedText].slice(-3);
+      }
     }
 
     unconfirmedText = unconfirmedParts.join(' ');
@@ -152,6 +223,13 @@ export function createLiveTranscriber({
   }
 
   recognition.onresult = (event) => {
+    const gapMs = performance.now() - lastResultAt;
+    if (hasGivenWords && gapMs >= GAP_MS) onDebugEvent(`words again after ${(gapMs / 1000).toFixed(1)} s without any`);
+    lastResultAt = performance.now();
+    if (!hasGivenWords) {
+      hasGivenWords = true;
+      onDebugEvent('first words');
+    }
     try {
       handleResults(event.results);
     } catch (error) {
@@ -177,6 +255,7 @@ export function createLiveTranscriber({
     if (wantsToListen) {
       startRecognition();
     } else {
+      clearInterval(stallCheck);
       onStopped();
     }
   };
@@ -188,6 +267,10 @@ export function createLiveTranscriber({
       slowStartTimer = setTimeout(() => {
         if (!hasStarted) onSlowStart();
       }, SLOW_START_MS);
+      recentlySaved = [];
+      isHearingSpeech = false;
+      clearInterval(stallCheck);
+      stallCheck = setInterval(restartIfStalled, 1000);
       startRecognition();
     },
     stop() {

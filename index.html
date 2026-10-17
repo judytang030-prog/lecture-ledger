@@ -31,6 +31,17 @@
             <label for="targetLanguage">Translate into</label>
             <select id="targetLanguage"></select>
           </div>
+          <div class="field field-narrow">
+            <label for="speakerCount">People speaking</label>
+            <select id="speakerCount" title="How many people talk in the recording. Auto decides from their voices.">
+              <option value="auto">Auto</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
           <div class="timer" id="timer" role="timer" aria-label="Time listened: 00:00">00:00</div>
         </div>
         <div class="console-row buttons">
@@ -111,7 +122,7 @@
         <div id="interim" class="row interim-row" aria-live="off" hidden>
           <div class="row-side"><span class="time">live</span></div>
           <div class="original" id="interimOriginal" lang="en" data-placeholder="Listening…"></div>
-          <div class="translation" id="interimTranslation" dir="auto"></div>
+          <div class="translation" id="interimTranslation" dir="auto"><span id="liveTranslationSettled"></span><span id="liveTranslationTail" class="live-tail"></span></div>
         </div>
         <p id="emptyState" class="empty-state">
           Press "Start listening" when class begins. Each sentence appears on the left as it is spoken, with its
