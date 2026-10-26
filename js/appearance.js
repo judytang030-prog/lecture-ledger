@@ -1,6 +1,8 @@
 // The page's look: the color theme chosen in the Theme panel, and the gentle
 // background animation behind the page, or, in a window-view theme, the view
-// out of the window with the weather chosen by its buttons.
+// out of the window, with the real weather where the student is or the
+// weather chosen by its buttons.
+import { fetchPlaceName, fetchWeather, findLocation } from './live-weather.js';
 import { logoSvg } from './logos.js';
 import { seededRandom } from './seeded-random.js';
 import { WEATHERS, WEATHER_NAMES, estimatedSunTimes, minutesAfterMidnight, skyColors, sunPosition } from './sky.js';
@@ -13,8 +15,10 @@ const THEME_STORAGE_KEY = 'lectureLedger.theme';
 // page first appears, so it never flashes the default colors.
 const THEME_COLORS_STORAGE_KEY = 'lectureLedger.themeColors';
 const WEATHER_STORAGE_KEY = 'lectureLedger.windowWeather';
-// How often the window view catches up with the time of day.
+// How often the window view catches up with the time of day, and with the
+// real weather.
 const SKY_UPDATE_MS = 60_000;
+const LIVE_WEATHER_UPDATE_MS = 15 * 60_000;
 
 // How each kind of background animation looks and moves. motion: rise, fall,
 // drift (left to right), twinkle (in place), or wander (small loops).
@@ -158,12 +162,12 @@ function themeCard(theme) {
 // day or night whatever the clock says.
 const previewTime = new URLSearchParams(window.location.search).get('time')?.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
 
-// The time of day and weather outside the window right now. Without a
-// location, sunrise and sunset are estimated from the date.
-function currentScene(weather) {
+// The time of day and weather outside the window right now. Without the real
+// sunrise and sunset, they are estimated from the date.
+function currentScene(weather, sunTimes) {
   const date = new Date();
   if (previewTime) date.setHours(Number(previewTime[1]), Number(previewTime[2]), 0, 0);
-  return { date, weather, sun: sunPosition(minutesAfterMidnight(date), estimatedSunTimes(date)) };
+  return { date, weather, sun: sunPosition(minutesAfterMidnight(date), sunTimes ?? estimatedSunTimes(date)) };
 }
 
 // A theme as it looks right now. A window theme takes its day or night colors
@@ -200,7 +204,7 @@ function showWeatherButtons(weatherPicker, { weather, sun }) {
 }
 
 function applyTheme(theme, scene, elements) {
-  const { ambienceEl, themeButtonLogo, themeButtonName, themeGrid, windowThemeGrid, weatherPicker } = elements;
+  const { ambienceEl, themeButtonLogo, themeButtonName, themeGrid, windowThemeGrid } = elements;
   const shown = themeAsShown(theme, scene);
   // The typewriter's lamp shines in the color of the theme's background animation.
   const variables = { ...themeVariables(shown), '--backdrop': shown.backdrop, '--lamp': shown.ambience.color };
@@ -217,49 +221,154 @@ function applyTheme(theme, scene, elements) {
     card.setAttribute('aria-pressed', String(card.dataset.themeId === theme.id));
   }
   renderAmbience(ambienceEl, shown);
-  weatherPicker.hidden = !isWindow;
-  if (isWindow) showWeatherButtons(weatherPicker, scene);
   return variables;
 }
+
+// What the "my weather" readout says while the real weather is being found.
+const LIVE_STATUS_TEXT = {
+  locating: 'Finding your location…',
+  loading: 'Getting the weather…',
+};
+
+// Why the real weather can't be shown, for the notice under the title.
+const LIVE_PROBLEM_TEXT = {
+  denied:
+    'The window can’t show the weather where you are, because this site isn’t allowed to see your location. ' +
+    'To allow it, click the icon at the left of the address bar, turn on Location, and reload the page. ' +
+    'Until then, pick the weather with the buttons.',
+  unlocated:
+    'Couldn’t find where you are. On a Mac, check that Chrome may use Location Services ' +
+    '(System Settings → Privacy & Security → Location Services). ' +
+    'It will try again in 15 minutes; until then, pick the weather with the buttons.',
+  failed:
+    'Couldn’t get the weather where you are (no internet, or the weather service didn’t answer). ' +
+    'It will try again in 15 minutes; until then, pick the weather with the buttons.',
+};
 
 // Fills the Theme panel with a card per theme and applies the saved theme.
 // Choosing a card applies and remembers that theme right away; the panel stays
 // open to compare others until it is closed (Esc, a click outside, or the button).
 export function setUpAppearance(elements) {
-  const { themeButton, themePanel, themeGrid, windowThemeGrid, weatherPicker, windowViewEl } = elements;
+  const { themeButton, themePanel, themeGrid, windowThemeGrid, weatherPicker, weatherReadout, windowViewEl, noticesEl } =
+    elements;
   const windowView = createWindowView(windowViewEl);
   let theme = findTheme(loadSavedThemeId());
   let weather = loadSavedWeather();
+  // The real weather where the student is, for the "my weather" window view.
+  // status: 'idle', 'locating', 'loading', 'ready', or a problem: 'denied',
+  // 'unlocated' (no location found) or 'failed' (no weather).
+  const live = { status: 'idle', location: null, report: null, place: '', checkedAt: 0, busy: false };
+  const locationNotice = document.createElement('p');
+  locationNotice.className = 'notice';
 
   themeGrid.append(...THEMES.map(themeCard));
   const scene = currentScene(weather);
   windowThemeGrid.append(...WINDOW_THEMES.map((windowTheme) => themeCard(themeAsShown(windowTheme, scene))));
   weatherPicker.append(...WEATHERS.map(weatherButton));
 
+  const usesLiveWeather = () => theme.weather === 'here';
+
+  // The weather buttons show in a window view unless it is showing the real
+  // weather; the readout says what the real weather is, or that it's coming.
+  const showWeatherControls = (now) => {
+    const liveProblem = usesLiveWeather() ? LIVE_PROBLEM_TEXT[live.status] : null;
+    weatherPicker.hidden = !theme.dayColors || (usesLiveWeather() && !liveProblem);
+    if (!weatherPicker.hidden) showWeatherButtons(weatherPicker, now);
+    weatherReadout.hidden = !usesLiveWeather() || Boolean(liveProblem);
+    if (!weatherReadout.hidden) {
+      const { report, place } = live;
+      weatherReadout.querySelector('.weather-readout-icon').innerHTML = report
+        ? weatherIconSvg(report.weather, !now.sun.isDay)
+        : '';
+      weatherReadout.querySelector('.weather-readout-text').textContent = report
+        ? [place, report.temperature, report.description].filter(Boolean).join(' · ')
+        : LIVE_STATUS_TEXT[live.status] ?? '';
+    }
+    if (liveProblem) {
+      locationNotice.textContent = liveProblem;
+      noticesEl.prepend(locationNotice);
+    } else {
+      locationNotice.remove();
+    }
+  };
+
   // Saved each time so the colors applied early stay in step with js/themes.js
   // and, in a window theme, with the time of day.
   const show = () => {
-    const now = currentScene(weather);
+    const report = usesLiveWeather() ? live.report : null;
+    const now = currentScene(report ? report.weather : weather, report?.sunTimes);
     saveTheme(theme, applyTheme(theme, now, elements));
+    showWeatherControls(now);
     if (theme.dayColors) windowView.show(now);
     else windowView.hide();
   };
+
+  // Finds the student's location (once; the browser asks them first) and the
+  // weather there, then shows it.
+  const refreshLiveWeather = async () => {
+    if (!usesLiveWeather() || live.busy) return;
+    live.busy = true;
+    live.checkedAt = Date.now();
+    try {
+      if (!live.location) {
+        live.status = 'locating';
+        show();
+        live.location = await findLocation();
+      }
+      if (!live.report) {
+        live.status = 'loading';
+        show();
+      }
+      const [report, place] = await Promise.all([
+        fetchWeather(live.location),
+        live.place || fetchPlaceName(live.location),
+      ]);
+      Object.assign(live, { report, place, status: 'ready' });
+    } catch (error) {
+      const problems = { denied: 'denied', unsupported: 'denied', unavailable: 'unlocated' };
+      live.status = problems[error.code] ?? 'failed';
+    } finally {
+      live.busy = false;
+    }
+    show();
+  };
+  const refreshIfDue = () => {
+    if (usesLiveWeather() && Date.now() - live.checkedAt >= LIVE_WEATHER_UPDATE_MS) refreshLiveWeather();
+  };
+
   show();
+  refreshIfDue();
   setInterval(() => {
     if (theme.dayColors) show();
+    refreshIfDue();
   }, SKY_UPDATE_MS);
 
-  const setPanelOpen = (open) => {
-    themePanel.hidden = !open;
+  // The Theme button opens and closes the panel (a popover, which the browser
+  // also closes on Esc or a click outside); it hangs under the button.
+  const placePanel = () => {
+    const button = themeButton.getBoundingClientRect();
+    themePanel.style.setProperty('--theme-panel-top', `${Math.round(button.bottom + 10)}px`);
+    themePanel.style.setProperty('--theme-panel-right', `${Math.round(Math.max(16, window.innerWidth - button.right))}px`);
+  };
+  themePanel.addEventListener('beforetoggle', (event) => {
+    if (event.newState === 'open') placePanel();
+  });
+  themePanel.addEventListener('toggle', (event) => {
+    const open = event.newState === 'open';
     themeButton.setAttribute('aria-expanded', String(open));
     if (open) themePanel.querySelector('[aria-pressed="true"]')?.focus();
+  });
+  const keepPanelPlaced = () => {
+    if (themePanel.matches(':popover-open')) placePanel();
   };
-  themeButton.addEventListener('click', () => setPanelOpen(themePanel.hidden));
+  window.addEventListener('scroll', keepPanelPlaced, { passive: true });
+  window.addEventListener('resize', keepPanelPlaced);
   themePanel.addEventListener('click', (event) => {
     const card = event.target.closest('.theme-card');
     if (!card) return;
     theme = findTheme(card.dataset.themeId) ?? findTheme(DEFAULT_THEME_ID);
     show();
+    if (usesLiveWeather() && live.status !== 'ready') refreshLiveWeather();
   });
   weatherPicker.addEventListener('click', (event) => {
     const button = event.target.closest('.weather-button');
@@ -267,16 +376,5 @@ export function setUpAppearance(elements) {
     weather = button.dataset.weather;
     saveWeather(weather);
     show();
-  });
-  document.addEventListener('click', (event) => {
-    if (!themePanel.hidden && !themePanel.contains(event.target) && !themeButton.contains(event.target)) {
-      setPanelOpen(false);
-    }
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !themePanel.hidden) {
-      setPanelOpen(false);
-      themeButton.focus();
-    }
   });
 }

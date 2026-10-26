@@ -177,15 +177,22 @@ body {
   height: 72%;
 }
 
+/* The panel is a popover, so it shows in the browser's top layer, above
+   everything on the page. js/appearance.js places it under the Theme button;
+   it ends above the bottom of the window, and scrolling inside it never
+   scrolls the page. */
 .theme-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 20;
+  position: fixed;
+  inset: auto;
+  top: var(--theme-panel-top, 80px);
+  right: var(--theme-panel-right, 16px);
+  margin: 0;
   width: min(720px, calc(100vw - 32px));
-  max-height: min(78vh, 640px);
+  max-height: min(640px, calc(100vh - var(--theme-panel-top, 80px) - 16px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px;
+  color: inherit;
   border-radius: 12px;
   border: 1px solid var(--panel-border);
   background: linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
@@ -374,6 +381,27 @@ body {
 .weather-button[aria-pressed='true'] {
   background: var(--on-bg);
   color: var(--bg-deep);
+}
+
+/* In the "my weather" window view: the place, temperature and weather. */
+.weather-readout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 3px 14px 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--on-bg-accent) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep), white 6%);
+  color: var(--on-bg);
+  font-family: var(--font-typed);
+  font-size: 0.8rem;
+}
+
+.weather-readout-icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
 }
 
 .notice {
@@ -1724,9 +1752,11 @@ html[data-scene='window'] .masthead {
   html[data-scene='window'] .masthead .tag {
     grid-row: 2;
     grid-column: 1;
+    letter-spacing: 0.1em;
   }
 
   html[data-scene='window'] .weather-picker,
+  html[data-scene='window'] .weather-readout,
   html[data-scene='window'] .theme-picker {
     grid-row: 1 / span 2;
   }

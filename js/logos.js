@@ -216,6 +216,22 @@ const DRAWINGS = {
     <rect x="18" y="8" width="64" height="104" rx="3" fill="none" stroke="#d3d7de" stroke-width="5"/>
     <path d="M50 8 V112 M18 50 H82" stroke="#d3d7de" stroke-width="4"/>`,
 
+  // A tall window by day, with a map pin: the weather where you are.
+  'window-here': (c, uid) => `
+    <defs>
+      <linearGradient id="logoWindowDay${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#3a7cc4"/>
+        <stop offset="1" stop-color="#bfdcf2"/>
+      </linearGradient>
+    </defs>
+    <rect x="18" y="8" width="64" height="104" rx="3" fill="url(#logoWindowDay${uid})"/>
+    <circle cx="66" cy="27" r="8" fill="#fff4cf"/>
+    <path d="M18 112 V96 H30 V88 H40 V100 H52 V84 H62 V98 H72 V92 H82 V112 Z" fill="#6f7f8f"/>
+    <rect x="18" y="8" width="64" height="104" rx="3" fill="none" stroke="#d3d7de" stroke-width="5"/>
+    <path d="M50 8 V112 M18 50 H82" stroke="#d3d7de" stroke-width="4"/>
+    <path d="M34 92 C22 76 20 70 20 64 A14 14 0 0 1 48 64 C48 70 46 76 34 92 Z" fill="#c8402f" stroke="#fff" stroke-width="2.5"/>
+    <circle cx="34" cy="64" r="5" fill="#fff"/>`,
+
   // A lava lamp.
   'lava-lamp': (c, uid) => `
     <defs><clipPath id="logoLavaGlass${uid}"><path d="M40 22 H60 L72 92 H28 Z"/></clipPath></defs>

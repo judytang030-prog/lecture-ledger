@@ -1469,8 +1469,10 @@ setUpAppearance({
   themeGrid: document.getElementById('themeGrid'),
   windowThemeGrid: document.getElementById('windowThemeGrid'),
   weatherPicker: document.getElementById('weatherPicker'),
+  weatherReadout: document.getElementById('weatherReadout'),
   ambienceEl: document.getElementById('ambience'),
   windowViewEl: document.getElementById('windowView'),
+  noticesEl,
 });
 diagnosticsEl.hidden = !isDebugMode;
 if (isDebugMode) logAiModelStatus();

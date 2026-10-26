@@ -31,6 +31,17 @@
         <h1>Lecture Ledger</h1>
         <div class="masthead-side">
           <span class="tag">live transcript and translation while class is running</span>
+          <div
+            id="weatherReadout"
+            class="weather-readout"
+            role="status"
+            aria-live="polite"
+            title="The weather where you are, from Open-Meteo, updated every 15 minutes"
+            hidden
+          >
+            <span class="weather-readout-icon" aria-hidden="true"></span>
+            <span class="weather-readout-text"></span>
+          </div>
           <div id="weatherPicker" class="weather-picker" role="group" aria-label="Weather outside the window" hidden>
             <span class="weather-picker-label" aria-hidden="true">Weather</span>
           </div>
@@ -39,6 +50,7 @@
               id="themeButton"
               class="theme-button"
               type="button"
+              popovertarget="themePanel"
               aria-haspopup="dialog"
               aria-expanded="false"
               aria-controls="themePanel"
@@ -48,7 +60,7 @@
               <span id="themeButtonName" class="theme-button-name"></span>
               <span aria-hidden="true">▾</span>
             </button>
-            <div id="themePanel" class="theme-panel" role="dialog" aria-label="Choose a theme" hidden>
+            <div id="themePanel" class="theme-panel" popover role="dialog" aria-label="Choose a theme">
               <p class="theme-panel-title">Choose a theme. Each card shows its colors.</p>
               <div id="themeGrid" class="theme-grid"></div>
               <p class="theme-panel-title">
