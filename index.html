@@ -25,11 +25,15 @@
   </head>
   <body>
     <div id="ambience" class="ambience" aria-hidden="true"></div>
+    <div id="windowView" class="window-view" aria-hidden="true" hidden></div>
     <main class="app">
       <header class="masthead">
         <h1>Lecture Ledger</h1>
         <div class="masthead-side">
           <span class="tag">live transcript and translation while class is running</span>
+          <div id="weatherPicker" class="weather-picker" role="group" aria-label="Weather outside the window" hidden>
+            <span class="weather-picker-label" aria-hidden="true">Weather</span>
+          </div>
           <div class="theme-picker">
             <button
               id="themeButton"
@@ -47,6 +51,10 @@
             <div id="themePanel" class="theme-panel" role="dialog" aria-label="Choose a theme" hidden>
               <p class="theme-panel-title">Choose a theme. Each card shows its colors.</p>
               <div id="themeGrid" class="theme-grid"></div>
+              <p class="theme-panel-title">
+                Window views: the background is the view out of a window, changing with the time of day.
+              </p>
+              <div id="windowThemeGrid" class="theme-grid"></div>
             </div>
           </div>
         </div>

@@ -324,6 +324,58 @@ body {
   visibility: visible;
 }
 
+.theme-grid + .theme-panel-title {
+  margin-top: 16px;
+}
+
+/* ---------- Weather buttons ----------
+   In a window-view theme, a row of buttons beside Theme sets the weather
+   outside the window. */
+
+.weather-picker {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--on-bg-accent) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep), white 6%);
+}
+
+.weather-picker-label {
+  margin-right: 6px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--on-bg-accent);
+}
+
+.weather-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--on-bg);
+}
+
+.weather-button svg {
+  width: 19px;
+  height: 19px;
+}
+
+.weather-button:hover {
+  background: color-mix(in srgb, var(--on-bg) 14%, transparent);
+}
+
+.weather-button[aria-pressed='true'] {
+  background: var(--on-bg);
+  color: var(--bg-deep);
+}
+
 .notice {
   background: color-mix(in srgb, var(--ribbon-red) 18%, transparent);
   border-left: 3px solid var(--ribbon-red);
@@ -1292,6 +1344,426 @@ body.is-typing .lamp-glow {
   }
 }
 
+/* ---------- Window view ----------
+   The window-view themes replace the background with the view out of a
+   floor-to-ceiling window, as a photograph focused on the glass would show
+   it: everything outside is soft (js/window-view.js sets its colors from the
+   sky at this time of day). The page covers its middle; the sun (right) and
+   the moon (left) sit in the strips beside it. */
+
+.window-view {
+  --strip-middle: max(30px, (100vw - 1072px) / 4);
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.window-view > *,
+.wv-outside > * {
+  position: absolute;
+  inset: 0;
+}
+
+.wv-sky {
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-middle) 58%, var(--sky-horizon) 86%);
+}
+
+.wv-stars {
+  opacity: var(--star-opacity);
+}
+
+.wv-star {
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.8;
+  box-shadow: 0 0 3px 1px rgba(220, 230, 255, 0.35);
+}
+
+.wv-star.twinkle {
+  animation: wv-twinkle var(--twinkle) ease-in-out infinite alternate;
+}
+
+@keyframes wv-twinkle {
+  to {
+    opacity: 0.25;
+  }
+}
+
+.window-view .wv-sun,
+.window-view .wv-moon {
+  inset: auto;
+  transform: translate(-50%, -50%);
+  transition:
+    top 2s ease,
+    opacity 2s ease;
+}
+
+.window-view .wv-sun {
+  left: calc(100% - var(--strip-middle));
+  top: var(--sun-y, 84%);
+  opacity: var(--sun-opacity, 0);
+}
+
+/* The sun is too bright to show a disc: a glare that fades into a wide haze. */
+.wv-sun-core {
+  display: block;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    #fffef8 0%,
+    color-mix(in srgb, var(--sun-color) 60%, white) 9%,
+    color-mix(in srgb, var(--sun-color) 55%, transparent) 22%,
+    color-mix(in srgb, var(--sun-color) 18%, transparent) 42%,
+    transparent 70%
+  );
+}
+
+.wv-sun-glow,
+.wv-moon-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.wv-sun-glow {
+  width: 900px;
+  height: 900px;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--sun-color) 55%, transparent) 0%,
+    color-mix(in srgb, var(--sun-color) 22%, transparent) 18%,
+    color-mix(in srgb, var(--sun-color) 8%, transparent) 38%,
+    transparent 62%
+  );
+}
+
+.window-view .wv-moon {
+  left: var(--strip-middle);
+  top: var(--moon-y, 84%);
+  opacity: var(--moon-opacity, 0);
+}
+
+.wv-moon svg {
+  position: relative;
+  display: block;
+  width: 54px;
+  height: 54px;
+  filter: blur(0.35px) drop-shadow(0 0 12px rgba(235, 240, 255, 0.4));
+}
+
+.wv-moon-glow {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(215, 225, 255, 0.14), transparent 62%);
+}
+
+/* The dark part of the moon, faintly lit by the earth. */
+.wv-moon-dark {
+  fill: #1f2436;
+  opacity: 0.6;
+}
+
+.wv-moon-seas {
+  fill: #8a8577;
+  opacity: 0.5;
+}
+
+.wv-moon-bright {
+  fill: #ffffff;
+  opacity: 0.7;
+}
+
+/* Out of focus, clouds are broad soft patches of light, or of shade. */
+.wv-cloud {
+  --tone: var(--cloud-light);
+  position: absolute;
+  left: 0;
+  aspect-ratio: 2.2;
+  background:
+    radial-gradient(ellipse 34% 40% at 34% 56%, var(--tone) 0%, transparent 100%),
+    radial-gradient(ellipse 30% 46% at 58% 46%, var(--tone) 0%, transparent 100%),
+    radial-gradient(ellipse 50% 34% at 50% 60%, color-mix(in srgb, var(--tone) 50%, transparent) 0%, transparent 100%);
+  animation: wv-cloud-drift linear infinite;
+}
+
+.wv-cloud-shade {
+  --tone: var(--cloud-shade);
+}
+
+@keyframes wv-cloud-drift {
+  from {
+    transform: translateX(-100vw);
+  }
+  to {
+    transform: translateX(110vw);
+  }
+}
+
+/* The town is far beyond the focus, so it is only soft shapes and light. */
+.window-view .wv-skyline {
+  top: auto;
+  width: 100%;
+  height: 38vh;
+  filter: blur(16px);
+}
+
+.wv-hills {
+  fill: var(--hills);
+}
+
+.wv-far {
+  fill: var(--building-far);
+}
+
+.wv-near {
+  fill: var(--building-near);
+}
+
+.wv-pane {
+  fill: var(--pane);
+  opacity: var(--pane-opacity);
+}
+
+.wv-lit {
+  fill: #ffd58a;
+  opacity: var(--lights);
+}
+
+.wv-trunk {
+  fill: var(--trunk);
+}
+
+.wv-crown-1 {
+  fill: var(--crown-1);
+}
+
+.wv-crown-2 {
+  fill: var(--crown-2);
+}
+
+.wv-crown-3 {
+  fill: var(--crown-3);
+}
+
+.wv-ground {
+  fill: var(--ground);
+}
+
+/* Rain, snow and fog on the glass blur the view still more. */
+.window-view[data-weather='rain'] .wv-skyline,
+.window-view[data-weather='thunder'] .wv-skyline,
+.window-view[data-weather='snow'] .wv-skyline,
+.window-view[data-weather='fog'] .wv-skyline {
+  filter: blur(22px);
+}
+
+/* The town's lights at night, out of focus: discs with a slightly brighter
+   rim, as a camera lens draws them. */
+.wv-bokeh {
+  opacity: var(--lights);
+}
+
+.wv-bokeh-light {
+  --diameter: calc(var(--size) * var(--bokeh-scale, 1));
+  position: absolute;
+  width: var(--diameter);
+  height: var(--diameter);
+  margin: calc(var(--diameter) * -0.5) 0 0 calc(var(--diameter) * -0.5);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--color) 72%, transparent) 0 52%,
+    color-mix(in srgb, var(--color) 88%, transparent) 64%,
+    transparent 71%
+  );
+  opacity: var(--strength);
+}
+
+/* Some lights brighten and dim a little. */
+.wv-breathing {
+  animation: wv-breathe ease-in-out infinite alternate;
+}
+
+@keyframes wv-breathe {
+  to {
+    opacity: calc(var(--strength) * 0.55);
+  }
+}
+
+/* Cars pass along the bottom: headlights one way, tail lights the other. */
+.wv-traffic {
+  animation-name: wv-traffic;
+  animation-timing-function: linear;
+  animation-direction: normal;
+}
+
+.wv-traffic-back {
+  animation-direction: reverse;
+}
+
+@keyframes wv-traffic {
+  from {
+    transform: translateX(-10vw);
+  }
+  to {
+    transform: translateX(110vw);
+  }
+}
+
+.wv-fog {
+  background: linear-gradient(180deg, transparent 0%, var(--haze) 50%, var(--haze) 100%);
+  opacity: var(--haze-opacity);
+}
+
+.wv-lightning {
+  background: radial-gradient(ellipse 120% 90% at 50% 0%, #eef3ff, #b9c8e6);
+  opacity: 0;
+}
+
+/* At night the glass faintly reflects the room's warm light. */
+.wv-glare {
+  background:
+    radial-gradient(ellipse 45% 40% at 10% 100%, rgba(255, 196, 120, var(--room-glow)), transparent 70%),
+    radial-gradient(ellipse 45% 40% at 90% 100%, rgba(255, 196, 120, var(--room-glow)), transparent 70%);
+}
+
+/* Frost creeps in from the corners when it snows. */
+.window-view[data-weather='snow'] .wv-glare::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 24% 38% at 0 100%, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(ellipse 24% 38% at 100% 100%, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(ellipse 18% 24% at 0 0, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(ellipse 18% 24% at 100% 0, rgba(255, 255, 255, 0.4), transparent);
+}
+
+/* The window's frame: its edges, a transom across near the top, and the sill. */
+.wv-frame > span {
+  position: absolute;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.35);
+}
+
+.wv-frame-top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 12px;
+  background: var(--frame);
+}
+
+.wv-transom {
+  top: 24%;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--frame), white 22%), var(--frame) 40%, color-mix(in srgb, var(--frame), black 40%));
+}
+
+.wv-frame-left,
+.wv-frame-right {
+  top: 0;
+  bottom: 0;
+  width: 16px;
+}
+
+.wv-frame-left {
+  left: 0;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--frame), black 40%), var(--frame) 55%, color-mix(in srgb, var(--frame), white 20%));
+}
+
+.wv-frame-right {
+  right: 0;
+  background: linear-gradient(270deg, color-mix(in srgb, var(--frame), black 40%), var(--frame) 55%, color-mix(in srgb, var(--frame), white 20%));
+}
+
+.wv-sill {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 20px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--frame), white 25%), var(--frame) 30%, color-mix(in srgb, var(--frame), black 45%));
+}
+
+/* With a window behind it, the title sits on a nearly solid backing so it
+   stays readable against any sky, and so do notices. (Not frosted glass: a
+   backdrop blur kept the Theme panel under the page and slowed the window's
+   animation.) */
+html[data-scene='window'] .masthead {
+  padding: 10px 16px;
+  border: 1px solid color-mix(in srgb, var(--on-bg-accent) 25%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-deep) 93%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+/* The weather buttons join the title bar: the title and its tagline on the
+   left, weather and theme on the right, where there is room. */
+@media (min-width: 900px) {
+  html[data-scene='window'] .masthead {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    column-gap: 8px;
+  }
+
+  html[data-scene='window'] .masthead-side {
+    display: contents;
+  }
+
+  html[data-scene='window'] .masthead .tag {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  html[data-scene='window'] .weather-picker,
+  html[data-scene='window'] .theme-picker {
+    grid-row: 1 / span 2;
+  }
+}
+
+html[data-scene='window'] .notice {
+  background: color-mix(in srgb, var(--ribbon-red) 10%, var(--bg-deep));
+}
+
+/* The window view has its own grain. */
+html[data-scene='window'] body::before {
+  display: none;
+}
+
+/* The camera's darker corners and a fine film grain. */
+.wv-lens {
+  background: radial-gradient(ellipse 80% 75% at 50% 45%, transparent 50%, rgba(0, 0, 0, 0.42) 100%);
+}
+
+.wv-lens::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23grain)'/%3E%3C/svg%3E");
+  opacity: 0.12;
+  mix-blend-mode: overlay;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wv-cloud,
+  .wv-breathing,
+  .wv-traffic,
+  .wv-star.twinkle {
+    animation: none;
+  }
+}
+
 .back-to-live {
   position: fixed;
   left: 50%;
@@ -1487,6 +1959,7 @@ body.is-dropping-file .page {
   .back-to-live,
   .typewriter,
   .ambience,
+  .window-view,
   .empty-state {
     display: none !important;
   }

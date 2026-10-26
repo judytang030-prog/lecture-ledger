@@ -201,6 +201,21 @@ const DRAWINGS = {
       <circle cx="77.5" cy="103.5" r="2.2" fill="#ffffff"/>
     </g>`,
 
+  // A tall window at dusk, with the moon over the town.
+  window: (c, uid) => `
+    <defs>
+      <linearGradient id="logoWindowSky${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#1b2850"/>
+        <stop offset="0.65" stop-color="#5b4f86"/>
+        <stop offset="1" stop-color="#ee9462"/>
+      </linearGradient>
+    </defs>
+    <rect x="18" y="8" width="64" height="104" rx="3" fill="url(#logoWindowSky${uid})"/>
+    <path d="M64 19 A11 11 0 1 0 75 36 A9 9 0 1 1 64 19 Z" fill="#f6efd6"/>
+    <path d="M18 112 V92 H27 V84 H35 V96 H44 V78 H53 V98 H62 V88 H70 V100 H82 V112 Z" fill="#161b2c"/>
+    <rect x="18" y="8" width="64" height="104" rx="3" fill="none" stroke="#d3d7de" stroke-width="5"/>
+    <path d="M50 8 V112 M18 50 H82" stroke="#d3d7de" stroke-width="4"/>`,
+
   // A lava lamp.
   'lava-lamp': (c, uid) => `
     <defs><clipPath id="logoLavaGlass${uid}"><path d="M40 22 H60 L72 92 H28 Z"/></clipPath></defs>

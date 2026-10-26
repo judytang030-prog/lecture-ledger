@@ -1,12 +1,20 @@
 // The page's look: the color theme chosen in the Theme panel, and the gentle
-// background animation behind the page.
+// background animation behind the page, or, in a window-view theme, the view
+// out of the window with the weather chosen by its buttons.
 import { logoSvg } from './logos.js';
-import { DEFAULT_THEME_ID, THEMES, findTheme, themeVariables } from './themes.js';
+import { seededRandom } from './seeded-random.js';
+import { WEATHERS, WEATHER_NAMES, estimatedSunTimes, minutesAfterMidnight, skyColors, sunPosition } from './sky.js';
+import { DEFAULT_THEME_ID, THEMES, WINDOW_THEMES, findTheme, themeVariables } from './themes.js';
+import { weatherIconSvg } from './weather-icons.js';
+import { createWindowView } from './window-view.js';
 
 const THEME_STORAGE_KEY = 'lectureLedger.theme';
 // The chosen theme's colors, which a script in index.html applies before the
 // page first appears, so it never flashes the default colors.
 const THEME_COLORS_STORAGE_KEY = 'lectureLedger.themeColors';
+const WEATHER_STORAGE_KEY = 'lectureLedger.windowWeather';
+// How often the window view catches up with the time of day.
+const SKY_UPDATE_MS = 60_000;
 
 // How each kind of background animation looks and moves. motion: rise, fall,
 // drift (left to right), twinkle (in place), or wander (small loops).
@@ -29,19 +37,6 @@ const AMBIENCE_KINDS = {
 };
 
 export const AMBIENCE_KIND_NAMES = Object.keys(AMBIENCE_KINDS);
-
-// Random numbers that are the same every time for the same theme, so the
-// background doesn't rearrange itself on every visit.
-function seededRandom(seedText) {
-  let seed = [...seedText].reduce((hash, character) => (hash * 31 + character.charCodeAt(0)) >>> 0, 7);
-  return () => {
-    seed = (seed + 0x6d2b79f5) >>> 0;
-    let t = seed;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function renderAmbience(container, theme) {
   const kind = AMBIENCE_KINDS[theme.ambience.kind];
@@ -81,6 +76,24 @@ function loadSavedThemeId() {
     // Storage can be blocked (e.g. private windows); the default is fine then.
   }
   return DEFAULT_THEME_ID;
+}
+
+function loadSavedWeather() {
+  try {
+    const saved = localStorage.getItem(WEATHER_STORAGE_KEY);
+    if (WEATHERS.includes(saved)) return saved;
+  } catch {
+    // Without storage the sky starts clear.
+  }
+  return 'clear';
+}
+
+function saveWeather(weather) {
+  try {
+    localStorage.setItem(WEATHER_STORAGE_KEY, weather);
+  } catch {
+    // Not remembering the weather is harmless.
+  }
 }
 
 function saveTheme(theme, variables) {
@@ -141,17 +154,71 @@ function themeCard(theme) {
   return card;
 }
 
-function applyTheme(theme, { ambienceEl, themeButtonLogo, themeButtonName, themeGrid }) {
+// ?time=14:30 in the address shows the window at that time of day, to preview
+// day or night whatever the clock says.
+const previewTime = new URLSearchParams(window.location.search).get('time')?.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+
+// The time of day and weather outside the window right now. Without a
+// location, sunrise and sunset are estimated from the date.
+function currentScene(weather) {
+  const date = new Date();
+  if (previewTime) date.setHours(Number(previewTime[1]), Number(previewTime[2]), 0, 0);
+  return { date, weather, sun: sunPosition(minutesAfterMidnight(date), estimatedSunTimes(date)) };
+}
+
+// A theme as it looks right now. A window theme takes its day or night colors
+// and a picture of the sky, which shows on its card and, until the scripts
+// run, behind the page; the typewriter lamp shines in its lamp color. Other
+// themes are unchanged.
+function themeAsShown(theme, { sun, weather }) {
+  if (!theme.dayColors) return theme;
+  const sky = skyColors(sun.height, weather);
+  return {
+    ...theme,
+    colors: sun.isDay ? theme.dayColors : theme.nightColors,
+    backdrop: `linear-gradient(180deg, ${sky.top}, ${sky.middle} 58%, ${sky.horizon} 86%)`,
+    ambience: { kind: 'none', color: theme.lamp },
+  };
+}
+
+function weatherButton(weather) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'weather-button';
+  button.dataset.weather = weather;
+  button.title = WEATHER_NAMES[weather];
+  button.setAttribute('aria-label', WEATHER_NAMES[weather]);
+  return button;
+}
+
+// Marks the chosen weather; clear weather shows a sun by day and a moon at night.
+function showWeatherButtons(weatherPicker, { weather, sun }) {
+  for (const button of weatherPicker.querySelectorAll('.weather-button')) {
+    button.innerHTML = weatherIconSvg(button.dataset.weather, !sun.isDay);
+    button.setAttribute('aria-pressed', String(button.dataset.weather === weather));
+  }
+}
+
+function applyTheme(theme, scene, elements) {
+  const { ambienceEl, themeButtonLogo, themeButtonName, themeGrid, windowThemeGrid, weatherPicker } = elements;
+  const shown = themeAsShown(theme, scene);
   // The typewriter's lamp shines in the color of the theme's background animation.
-  const variables = { ...themeVariables(theme), '--backdrop': theme.backdrop, '--lamp': theme.ambience.color };
+  const variables = { ...themeVariables(shown), '--backdrop': shown.backdrop, '--lamp': shown.ambience.color };
   for (const [variable, value] of Object.entries(variables)) {
     document.documentElement.style.setProperty(variable, value);
   }
   document.documentElement.dataset.theme = theme.id;
-  showLogo(themeButtonLogo, theme);
+  const isWindow = Boolean(theme.dayColors);
+  if (isWindow) document.documentElement.dataset.scene = 'window';
+  else delete document.documentElement.dataset.scene;
+  showLogo(themeButtonLogo, shown);
   themeButtonName.textContent = theme.name;
-  for (const card of themeGrid.children) card.setAttribute('aria-pressed', String(card.dataset.themeId === theme.id));
-  renderAmbience(ambienceEl, theme);
+  for (const card of [...themeGrid.children, ...windowThemeGrid.children]) {
+    card.setAttribute('aria-pressed', String(card.dataset.themeId === theme.id));
+  }
+  renderAmbience(ambienceEl, shown);
+  weatherPicker.hidden = !isWindow;
+  if (isWindow) showWeatherButtons(weatherPicker, scene);
   return variables;
 }
 
@@ -159,23 +226,47 @@ function applyTheme(theme, { ambienceEl, themeButtonLogo, themeButtonName, theme
 // Choosing a card applies and remembers that theme right away; the panel stays
 // open to compare others until it is closed (Esc, a click outside, or the button).
 export function setUpAppearance(elements) {
-  const { themeButton, themePanel, themeGrid } = elements;
+  const { themeButton, themePanel, themeGrid, windowThemeGrid, weatherPicker, windowViewEl } = elements;
+  const windowView = createWindowView(windowViewEl);
+  let theme = findTheme(loadSavedThemeId());
+  let weather = loadSavedWeather();
+
   themeGrid.append(...THEMES.map(themeCard));
-  const savedTheme = findTheme(loadSavedThemeId());
-  // Saved again so the colors applied early stay in step with js/themes.js.
-  saveTheme(savedTheme, applyTheme(savedTheme, elements));
+  const scene = currentScene(weather);
+  windowThemeGrid.append(...WINDOW_THEMES.map((windowTheme) => themeCard(themeAsShown(windowTheme, scene))));
+  weatherPicker.append(...WEATHERS.map(weatherButton));
+
+  // Saved each time so the colors applied early stay in step with js/themes.js
+  // and, in a window theme, with the time of day.
+  const show = () => {
+    const now = currentScene(weather);
+    saveTheme(theme, applyTheme(theme, now, elements));
+    if (theme.dayColors) windowView.show(now);
+    else windowView.hide();
+  };
+  show();
+  setInterval(() => {
+    if (theme.dayColors) show();
+  }, SKY_UPDATE_MS);
 
   const setPanelOpen = (open) => {
     themePanel.hidden = !open;
     themeButton.setAttribute('aria-expanded', String(open));
-    if (open) themeGrid.querySelector('[aria-pressed="true"]')?.focus();
+    if (open) themePanel.querySelector('[aria-pressed="true"]')?.focus();
   };
   themeButton.addEventListener('click', () => setPanelOpen(themePanel.hidden));
-  themeGrid.addEventListener('click', (event) => {
+  themePanel.addEventListener('click', (event) => {
     const card = event.target.closest('.theme-card');
     if (!card) return;
-    const theme = findTheme(card.dataset.themeId) ?? findTheme(DEFAULT_THEME_ID);
-    saveTheme(theme, applyTheme(theme, elements));
+    theme = findTheme(card.dataset.themeId) ?? findTheme(DEFAULT_THEME_ID);
+    show();
+  });
+  weatherPicker.addEventListener('click', (event) => {
+    const button = event.target.closest('.weather-button');
+    if (!button) return;
+    weather = button.dataset.weather;
+    saveWeather(weather);
+    show();
   });
   document.addEventListener('click', (event) => {
     if (!themePanel.hidden && !themePanel.contains(event.target) && !themeButton.contains(event.target)) {

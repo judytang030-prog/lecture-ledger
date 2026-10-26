@@ -1467,7 +1467,10 @@ setUpAppearance({
   themeButtonName: document.getElementById('themeButtonName'),
   themePanel: document.getElementById('themePanel'),
   themeGrid: document.getElementById('themeGrid'),
+  windowThemeGrid: document.getElementById('windowThemeGrid'),
+  weatherPicker: document.getElementById('weatherPicker'),
   ambienceEl: document.getElementById('ambience'),
+  windowViewEl: document.getElementById('windowView'),
 });
 diagnosticsEl.hidden = !isDebugMode;
 if (isDebugMode) logAiModelStatus();
