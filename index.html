@@ -10,13 +10,46 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Applies the chosen theme's colors before the page first appears (js/appearance.js saves them).
+      try {
+        const colors = JSON.parse(localStorage.getItem('lectureLedger.themeColors') || '{}');
+        for (const [variable, value] of Object.entries(colors)) {
+          if (variable.startsWith('--')) document.documentElement.style.setProperty(variable, value);
+        }
+      } catch {
+        // Without saved colors the default theme shows.
+      }
+    </script>
     <script type="module" src="js/app.js"></script>
   </head>
   <body>
+    <div id="ambience" class="ambience" aria-hidden="true"></div>
     <main class="app">
       <header class="masthead">
         <h1>Lecture Ledger</h1>
-        <span class="tag">live transcript and translation while class is running</span>
+        <div class="masthead-side">
+          <span class="tag">live transcript and translation while class is running</span>
+          <div class="theme-picker">
+            <button
+              id="themeButton"
+              class="theme-button"
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="themePanel"
+            >
+              <span id="themeButtonLogo" class="theme-logo" aria-hidden="true"></span>
+              <span class="theme-button-label">Theme</span>
+              <span id="themeButtonName" class="theme-button-name"></span>
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div id="themePanel" class="theme-panel" role="dialog" aria-label="Choose a theme" hidden>
+              <p class="theme-panel-title">Choose a theme. Each card shows its colors.</p>
+              <div id="themeGrid" class="theme-grid"></div>
+            </div>
+          </div>
+        </div>
       </header>
 
       <div id="notices"></div>
@@ -130,31 +163,96 @@
         </p>
       </section>
 
+      <!-- The typewriter, drawn flat but lit from above: a gloss along its top, shade
+           deepening toward the desk, rounded sides falling into shadow, and soft
+           shadows under its parts. Its enamel and lamp colors come from the theme. -->
       <div class="typewriter" aria-hidden="true">
-        <svg id="typewriterArt" viewBox="0 0 1000 350" preserveAspectRatio="xMidYMin meet">
+        <svg id="typewriterArt" viewBox="0 0 1000 380" preserveAspectRatio="xMidYMin meet">
           <defs>
-            <!-- Black rubber platen with a soft highlight. -->
+            <!-- Black rubber platen: a cylinder, bright where it faces the light. -->
             <linearGradient id="platenShade" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#0d0d0d" />
-              <stop offset="0.35" stop-color="#4d4c4a" />
-              <stop offset="0.6" stop-color="#232322" />
-              <stop offset="1" stop-color="#080808" />
+              <stop offset="0" stop-color="#0a0a0a" />
+              <stop offset="0.3" stop-color="#5a5956" />
+              <stop offset="0.42" stop-color="#2e2d2b" />
+              <stop offset="1" stop-color="#050505" />
             </linearGradient>
-            <!-- Warm, slightly worn dark-grey enamel, like a vintage machine. -->
+            <!-- The enamel: lighter at the top where the light falls, darker toward the desk. -->
             <linearGradient id="bodyShade" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#5c5a55" />
-              <stop offset="0.12" stop-color="#4a4844" />
-              <stop offset="1" stop-color="#252422" />
+              <stop offset="0" style="stop-color: color-mix(in srgb, var(--machine), white 22%)" />
+              <stop offset="0.14" style="stop-color: var(--machine)" />
+              <stop offset="0.6" style="stop-color: color-mix(in srgb, var(--machine), black 25%)" />
+              <stop offset="1" style="stop-color: color-mix(in srgb, var(--machine), black 58%)" />
+            </linearGradient>
+            <!-- The sides turn away from the light. -->
+            <linearGradient id="bodySides" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#000" stop-opacity="0.4" />
+              <stop offset="0.14" stop-color="#000" stop-opacity="0" />
+              <stop offset="0.86" stop-color="#000" stop-opacity="0" />
+              <stop offset="1" stop-color="#000" stop-opacity="0.4" />
+            </linearGradient>
+            <!-- Gloss: the room's light reflected along the top of the enamel. -->
+            <linearGradient id="bodyGloss" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#fff" stop-opacity="0.32" />
+              <stop offset="1" stop-color="#fff" stop-opacity="0" />
+            </linearGradient>
+            <!-- The platen and paper shade the deck just below them. -->
+            <linearGradient id="platenShadow" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#000" stop-opacity="0.5" />
+              <stop offset="1" stop-color="#000" stop-opacity="0" />
+            </linearGradient>
+            <!-- The deep well the typebars rest in. -->
+            <radialGradient id="wellShade" cx="0.5" cy="0" r="1">
+              <stop offset="0" stop-color="#000" />
+              <stop offset="0.75" stop-color="#121211" />
+              <stop offset="1" stop-color="#2a2927" />
+            </radialGradient>
+            <!-- Black bakelite knobs, with a highlight. -->
+            <radialGradient id="knobShade" cx="0.35" cy="0.3" r="0.75">
+              <stop offset="0" stop-color="#55534f" />
+              <stop offset="0.5" stop-color="#1a1a19" />
+              <stop offset="1" stop-color="#050505" />
+            </radialGradient>
+            <!-- Keys: the theme's key color, lit from the upper left. -->
+            <radialGradient id="keyShade" cx="0.38" cy="0.3" r="0.8">
+              <stop offset="0" style="stop-color: color-mix(in srgb, var(--key-cap), white 26%)" />
+              <stop offset="0.65" style="stop-color: var(--key-cap)" />
+              <stop offset="1" style="stop-color: color-mix(in srgb, var(--key-cap), black 45%)" />
+            </radialGradient>
+            <!-- The indicator lamp: glass in the theme's light color, and the glow around it when lit. -->
+            <radialGradient id="lampGlass" cx="0.4" cy="0.35" r="0.7">
+              <stop offset="0" style="stop-color: color-mix(in srgb, var(--lamp), white 65%)" />
+              <stop offset="0.45" style="stop-color: var(--lamp)" />
+              <stop offset="1" style="stop-color: color-mix(in srgb, var(--lamp), black 45%)" />
+            </radialGradient>
+            <radialGradient id="lampHalo" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0.3" style="stop-color: var(--lamp)" stop-opacity="0.85" />
+              <stop offset="1" style="stop-color: var(--lamp)" stop-opacity="0" />
+            </radialGradient>
+            <!-- Polished chrome, for the platen collars and the lamp's bezel. -->
+            <linearGradient id="chromeShade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#f4f3ef" />
+              <stop offset="0.45" stop-color="#a3a19b" />
+              <stop offset="0.55" stop-color="#6b6964" />
+              <stop offset="1" stop-color="#d6d4ce" />
             </linearGradient>
             <linearGradient id="ribbonShade" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0.5" stop-color="#151515" />
-              <stop offset="0.5" stop-color="#9a2f25" />
+              <stop offset="0.5" style="stop-color: var(--ribbon-red)" />
             </linearGradient>
+            <clipPath id="bodyClip"><path d="M60 30 H940 C962 30 972 44 976 66 C989 150 995 228 996 316 C996 352 966 380 930 380 H70 C34 380 4 352 4 316 C5 228 11 150 24 66 C28 44 38 30 60 30 Z" /></clipPath>
             <clipPath id="platenClip"><rect x="30" y="4" width="940" height="44" rx="22" /></clipPath>
           </defs>
-          <path class="machine-body" d="M60 30 H940 C962 30 972 44 976 66 L1000 350 H0 L24 66 C28 44 38 30 60 30 Z" />
+          <path class="machine-body" d="M60 30 H940 C962 30 972 44 976 66 C989 150 995 228 996 316 C996 352 966 380 930 380 H70 C34 380 4 352 4 316 C5 228 11 150 24 66 C28 44 38 30 60 30 Z" />
+          <g clip-path="url(#bodyClip)">
+            <rect x="0" y="28" width="1000" height="352" fill="url(#bodySides)" />
+            <rect x="0" y="44" width="1000" height="26" fill="url(#platenShadow)" />
+          </g>
+          <path class="body-gloss" d="M70 34 H930 C946 34 954 42 958 56 L961 74 H39 L42 56 C46 42 54 34 70 34 Z" fill="url(#bodyGloss)" />
+          <path class="body-edge" d="M24 66 C28 44 38 30 60 30 H940 C962 30 972 44 976 66" />
           <path class="chrome-trim" d="M40 76 H960" />
-          <path class="basket-well" d="M318 52 A182 182 0 0 0 682 52 Z" />
+          <path class="chrome-trim-shine" d="M40 74.5 H960" />
+          <path class="basket-well" d="M350 52 A150 150 0 0 0 650 52 Z" />
+          <path class="basket-rim" d="M350 52 A150 150 0 0 0 650 52" />
           <g id="typebars"></g>
           <rect class="ribbon" x="476" y="50" width="48" height="8" rx="2" />
           <path class="type-guide" d="M486 58 H514 L509 70 H491 Z" />
@@ -172,16 +270,22 @@
               <line x1="30" y1="56" x2="970" y2="56" />
             </g>
           </g>
+          <!-- Chrome collars finish the platen's ends where it meets the knobs. -->
+          <rect x="32" y="7" width="12" height="38" rx="4" fill="url(#chromeShade)" />
+          <rect x="956" y="7" width="12" height="38" rx="4" fill="url(#chromeShade)" />
           <line class="paper-bail" x1="70" y1="12" x2="930" y2="12" />
           <circle class="knob" cx="18" cy="26" r="24" />
           <circle class="knob-center" cx="18" cy="26" r="10" />
           <circle class="knob" cx="982" cy="26" r="24" />
           <circle class="knob-center" cx="982" cy="26" r="10" />
-          <text class="nameplate" x="500" y="244">LECTURE LEDGER</text>
+          <text class="nameplate" x="500" y="232">LECTURE LEDGER</text>
           <g id="keys"></g>
-          <g id="bell" class="bell" opacity="0.25">
-            <path d="M922 84 a10 10 0 0 1 20 0 v4 h-20 z" />
-            <circle cx="932" cy="91" r="2.5" />
+          <!-- An indicator lamp in the theme's light: lit while listening, flashing at each new line. -->
+          <g class="lamp">
+            <circle id="lampGlow" class="lamp-glow" cx="932" cy="100" r="26" fill="url(#lampHalo)" />
+            <circle cx="932" cy="100" r="12.5" fill="url(#chromeShade)" />
+            <circle class="lamp-glass" cx="932" cy="100" r="9.5" fill="url(#lampGlass)" />
+            <ellipse cx="928.5" cy="96" rx="3.4" ry="2.2" fill="#fff" opacity="0.65" />
           </g>
         </svg>
       </div>

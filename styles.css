@@ -1,27 +1,43 @@
-/* Colors and fonts carried over from the September prototype. */
+/* Colors and fonts carried over from the September prototype. These are the
+   "Library green" theme; js/themes.js has the others and js/appearance.js
+   switches between them. */
 :root {
-  /* The control panel's light grey enamel, and the typewriter's chrome and brass. */
+  /* The page around the paper: its color and lighting, and text written directly on it. */
+  --bg-deep: #14231c;
+  --backdrop: radial-gradient(ellipse 70% 60% at 8% 0%, rgba(240, 190, 110, 0.2), transparent 70%), radial-gradient(ellipse 120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, 0.5));
+  --on-bg: #efe6d0;
+  --on-bg-accent: #c9a35a;
+  --error-on-dark: #f5c6be;
+  /* The control panel's light grey enamel. */
   --panel-top: #bdbab3;
   --panel-bottom: #9e9b94;
-  --panel-text: #2b2926;
-  --chrome: #c3c1ba;
-  --brass: #c9a35a;
-  --ribbon-red: #9a2f25;
-  --key-text: #efe6d0;
-  --panel-text-muted: #403d38;
-  --panel-error: #8a2218;
-  --bg-deep: #14231c;
-  --bg-deep-2: #0f1b15;
+  --panel-text: #0c0c0b;
+  --panel-text-muted: #34322e;
+  --panel-error: #621811;
+  --panel-border: #5f5c56;
+  /* The paper and its ink. */
   --paper: #f5efdf;
   --ink: #26312b;
   --ink-soft: #5b6259;
-  --muted-on-dark: #9da69c;
+  --line: #d8cdb0;
   --amber: #c98a2c;
   --amber-soft: #f0d9ae;
+  /* The record key and lamp (also the "LIVE" label), and a deeper shade for accents on the paper. */
+  --record-red: #b8402f;
+  --accent-text: #fff3e3;
   --rust: #9a4632;
-  --record-red: #c0392b;
-  --error-on-dark: #f5c6be;
-  --line: #d8cdb0;
+  /* The typewriter's enamel and name, brass and ribbon accents, and dark keys. */
+  --machine: #4a4844;
+  --nameplate: #c9a35a;
+  /* The typewriter's indicator lamp (the theme's background-animation color). */
+  --lamp: #e8c27a;
+  --chrome: #c3c1ba;
+  --brass: #c9a35a;
+  --brass-deep: #a8813d;
+  --brass-text: #2a1e0a;
+  --ribbon-red: #9a2f25;
+  --key-cap: #1b1a19;
+  --key-text: #efe6d0;
   /* Typewriter type for the transcript; CJK text falls back to a Song (Ming) serif. */
   --font-typed: 'Courier Prime', 'Songti SC', 'STSong', 'Noto Serif SC', 'Courier New', serif;
   --font-stamped: 'Special Elite', 'Songti SC', 'STSong', 'Courier New', serif;
@@ -29,6 +45,19 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* A faint film grain over the background, so it reads like a photograph rather
+   than flat color. It sits behind the page, never over the paper. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23grain)'/%3E%3C/svg%3E");
+  opacity: 0.16;
+  mix-blend-mode: overlay;
 }
 
 /* Elements with their own display (like grid rows) must still hide when marked hidden. */
@@ -43,7 +72,8 @@ body {
 }
 
 body {
-  background: radial-gradient(circle at 15% 10%, rgba(201, 138, 44, 0.08), transparent 40%), var(--bg-deep);
+  background: var(--backdrop), var(--bg-deep);
+  background-attachment: fixed;
   min-height: 100vh;
   font-family: 'Inter', sans-serif;
   color: var(--paper);
@@ -53,6 +83,8 @@ body {
 }
 
 .app {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 1040px;
 }
@@ -67,7 +99,7 @@ body {
   gap: 8px;
   margin-bottom: 18px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(201, 163, 90, 0.3);
+  border-bottom: 1px solid color-mix(in srgb, var(--on-bg-accent) 30%, transparent);
 }
 
 .masthead h1 {
@@ -76,8 +108,15 @@ body {
   font-size: 1.75rem;
   letter-spacing: 0.02em;
   margin: 0;
-  color: var(--key-text);
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+  color: var(--on-bg);
+  text-shadow: 0 2px 0 color-mix(in srgb, var(--bg-deep), black 45%);
+}
+
+.masthead-side {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 20px;
 }
 
 .masthead .tag {
@@ -85,11 +124,208 @@ body {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.16em;
-  color: var(--brass);
+  color: var(--on-bg-accent);
+}
+
+/* ---------- Theme panel ----------
+   "Theme" opens a panel of cards, each a small picture of the page in that
+   theme with its logo, so a theme can be chosen by how it looks. */
+
+.theme-picker {
+  position: relative;
+}
+
+.theme-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 5px;
+  border: 1px solid color-mix(in srgb, var(--on-bg-accent) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep), white 6%);
+  color: var(--on-bg);
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.theme-button:hover {
+  border-color: var(--on-bg-accent);
+}
+
+.theme-button-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--on-bg-accent);
+}
+
+/* A logo sits in a small round badge of its theme's background color. */
+.theme-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--logo-bg, var(--bg-deep));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.theme-logo svg {
+  width: 72%;
+  height: 72%;
+}
+
+.theme-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(78vh, 640px);
+  overflow-y: auto;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+  background: linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.theme-panel-title {
+  margin: 0 0 10px;
+  font-family: var(--font-typed);
+  font-size: 0.8rem;
+  color: var(--panel-text-muted);
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 640px) {
+  .theme-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel-top), white 35%);
+  color: var(--panel-text);
+  text-align: left;
+  font-weight: 400;
+}
+
+.theme-card:hover {
+  border-color: color-mix(in srgb, var(--panel-text) 35%, transparent);
+}
+
+.theme-card[aria-pressed='true'] {
+  border-color: var(--panel-text);
+}
+
+/* The little picture of the page: background, control panel, paper, and typewriter. */
+.theme-demo {
+  position: relative;
+  display: block;
+  height: 96px;
+  background: var(--demo-backdrop, none), var(--demo-bg);
+}
+
+.demo-panel {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--demo-panel-top), var(--demo-panel-bottom));
+}
+
+.demo-key {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.demo-counter {
+  margin-left: auto;
+  width: 22px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--demo-key-cap);
+}
+
+.demo-paper {
+  position: absolute;
+  top: 30px;
+  left: 14px;
+  right: 14px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  background: var(--demo-paper);
+}
+
+.demo-line {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--demo-ink);
+}
+
+.demo-line.soft {
+  background: var(--demo-ink-soft);
+}
+
+.demo-machine {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 0;
+  height: 18px;
+  border-radius: 7px 7px 0 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--demo-machine), white 15%),
+    color-mix(in srgb, var(--demo-machine), black 45%)
+  );
+  box-shadow: inset 0 3px 0 rgba(0, 0, 0, 0.55);
+}
+
+.theme-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  font-family: var(--font-typed);
+  font-size: 0.78rem;
+}
+
+.theme-card-check {
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.theme-card[aria-pressed='true'] .theme-card-check {
+  visibility: visible;
 }
 
 .notice {
-  background: rgba(154, 47, 37, 0.18);
+  background: color-mix(in srgb, var(--ribbon-red) 18%, transparent);
   border-left: 3px solid var(--ribbon-red);
   color: var(--error-on-dark);
   border-radius: 3px;
@@ -112,7 +348,7 @@ body {
     var(--screw) calc(100% - 10px) calc(100% - 10px) / 8px 8px no-repeat,
     linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
   border-radius: 14px;
-  border: 1px solid #5f5c56;
+  border: 1px solid var(--panel-border);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.6),
@@ -176,7 +412,7 @@ body {
 }
 
 .field input::placeholder {
-  color: #8f8a7c;
+  color: color-mix(in srgb, var(--ink) 50%, var(--paper));
 }
 
 .field input:focus,
@@ -202,7 +438,12 @@ body {
   padding: 4px 5px;
   text-align: center;
   color: var(--key-text);
-  background: linear-gradient(180deg, #0c0c0b, #2a2927 50%, #0c0c0b);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--key-cap), black 55%),
+    color-mix(in srgb, var(--key-cap), white 8%) 50%,
+    color-mix(in srgb, var(--key-cap), black 55%)
+  );
   border-radius: 3px;
   box-shadow:
     inset 0 0 0 1px rgba(195, 193, 186, 0.35),
@@ -278,12 +519,16 @@ button:focus-visible {
 
 /* Record is red, like the ribbon. */
 .btn-record {
-  background: linear-gradient(180deg, #b8402f, #7a231a);
-  color: #fff3e3;
+  background: linear-gradient(180deg, var(--record-red), color-mix(in srgb, var(--record-red), black 35%));
+  color: var(--accent-text);
 }
 
 .btn-record.recording {
-  background: linear-gradient(180deg, #d4483a, #932a20);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--record-red), white 12%),
+    color-mix(in srgb, var(--record-red), black 22%)
+  );
   animation: recording-glow 1.6s ease-in-out infinite;
 }
 
@@ -291,19 +536,19 @@ button:focus-visible {
   50% {
     box-shadow:
       0 3px 0 #0b0b0a,
-      0 0 16px rgba(220, 70, 50, 0.55),
+      0 0 16px color-mix(in srgb, var(--record-red) 60%, transparent),
       inset 0 1px 0 rgba(255, 255, 255, 0.18);
   }
 }
 
 /* Flag is brass. */
 .btn-amber {
-  background: linear-gradient(180deg, #ddb974, #a8813d);
-  color: #2a1e0a;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brass), white 12%), var(--brass-deep));
+  color: var(--brass-text);
 }
 
 .btn-ghost {
-  background: linear-gradient(180deg, #2c2b29, #141312);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--key-cap), white 10%), var(--key-cap));
   color: var(--key-text);
 }
 
@@ -344,7 +589,12 @@ p.status-line:empty {
 }
 
 .dot.live {
-  background: radial-gradient(circle at 35% 35%, #ffb19f, #e0402c 55%, #7a1b11);
+  background: radial-gradient(
+    circle at 35% 35%,
+    color-mix(in srgb, var(--record-red), white 55%),
+    color-mix(in srgb, var(--record-red), white 10%) 55%,
+    color-mix(in srgb, var(--record-red), black 45%)
+  );
   animation: lamp-glow 1.6s ease-in-out infinite;
 }
 
@@ -352,12 +602,12 @@ p.status-line:empty {
   0%,
   100% {
     box-shadow:
-      0 0 4px rgba(255, 80, 55, 0.5),
+      0 0 4px color-mix(in srgb, var(--record-red) 55%, transparent),
       0 0 0 1px rgba(195, 193, 186, 0.35);
   }
   50% {
     box-shadow:
-      0 0 12px rgba(255, 80, 55, 0.85),
+      0 0 12px color-mix(in srgb, var(--record-red) 90%, transparent),
       0 0 0 1px rgba(195, 193, 186, 0.35);
   }
 }
@@ -445,8 +695,11 @@ p.status-line:empty {
 }
 
 .row.flagged {
-  background: rgba(201, 138, 44, 0.14);
-  box-shadow: -14px 0 0 rgba(201, 138, 44, 0.14), 14px 0 0 rgba(201, 138, 44, 0.14);
+  --flag-wash: color-mix(in srgb, var(--amber) 14%, transparent);
+  background: var(--flag-wash);
+  box-shadow:
+    -14px 0 0 var(--flag-wash),
+    14px 0 0 var(--flag-wash);
   border-bottom-color: transparent;
 }
 
@@ -511,7 +764,7 @@ p.status-line:empty {
 }
 
 .row .translation {
-  color: #3b4a40;
+  color: color-mix(in srgb, var(--ink) 85%, var(--paper));
 }
 
 .row .translation.pending {
@@ -533,12 +786,12 @@ p.status-line:empty {
 }
 
 [contenteditable]:hover {
-  background: rgba(38, 49, 43, 0.05);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 [contenteditable]:focus {
   outline: 2px solid var(--amber);
-  background: #fffaf0;
+  background: color-mix(in srgb, var(--paper), white 45%);
 }
 
 /* ---------- Section headings ---------- */
@@ -698,7 +951,8 @@ body.is-typing .interim-row .original::after {
   }
 }
 
-/* ---------- The typewriter below the paper ---------- */
+/* ---------- The typewriter below the paper ----------
+   Drawn flat, but lit from above (see the gradients in index.html). */
 
 /* The paper's end tucks under the platen. */
 .typewriter {
@@ -712,21 +966,41 @@ body.is-typing .interim-row .original::after {
   display: block;
   width: 100%;
   height: auto;
-  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45));
+  /* The platen knobs reach a little past the drawing's edges; show them whole. */
+  overflow: visible;
+  /* A soft shadow on the desk, and a closer, darker one right under the machine. */
+  filter: drop-shadow(0 26px 34px rgba(0, 0, 0, 0.5)) drop-shadow(0 6px 6px rgba(0, 0, 0, 0.35));
 }
 
 .machine-body {
   fill: url(#bodyShade);
 }
 
+/* A thin highlight along the machine's top edge, where its curve catches the light. */
+.body-edge {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.3);
+  stroke-width: 1.5;
+}
+
 .chrome-trim {
-  stroke: #9d9b95;
-  stroke-width: 2;
-  opacity: 0.55;
+  stroke: #6f6d68;
+  stroke-width: 2.5;
+}
+
+.chrome-trim-shine {
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 1;
 }
 
 .basket-well {
-  fill: #141312;
+  fill: url(#wellShade);
+}
+
+.basket-rim {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 2;
 }
 
 .typebar {
@@ -735,7 +1009,7 @@ body.is-typing .interim-row .original::after {
 
 .typebar-arm,
 .strike-arm {
-  stroke: #b8b6b0;
+  stroke: #c4c2bc;
   stroke-width: 3.5;
   stroke-linecap: round;
 }
@@ -781,55 +1055,241 @@ body.is-typing .interim-row .original::after {
 }
 
 .paper-bail {
-  stroke: #c9c7c0;
-  stroke-width: 2.5;
+  stroke: #d6d4cd;
+  stroke-width: 3;
   stroke-linecap: round;
 }
 
 .knob {
-  fill: #1a1a19;
-  stroke: #6b6964;
+  fill: url(#knobShade);
+  stroke: #3a3936;
   stroke-width: 2;
 }
 
 .knob-center {
-  fill: #b9b7b0;
+  fill: #c9c7c0;
   stroke: #6b6964;
   stroke-width: 1.5;
 }
 
-/* Brass badge. */
+/* The name, stamped in a color that shows on the theme's enamel. */
 .nameplate {
-  fill: var(--brass);
+  fill: var(--nameplate);
   font-family: var(--font-stamped);
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 6px;
   text-anchor: middle;
 }
 
+/* Keys: drawn by js/typewriter.js, lit from the upper left. */
+.key-shadow {
+  fill: rgba(0, 0, 0, 0.4);
+}
+
 .key-cap {
-  fill: #1b1a19;
+  fill: url(#keyShade);
   stroke: var(--chrome);
   stroke-width: 2;
-  transition: fill 0.12s ease;
+}
+
+.key-shine {
+  fill: #fff;
+  opacity: 0.2;
+}
+
+.space-bar {
+  fill: url(#keyShade);
 }
 
 .key.pressed .key-cap,
 .space-bar.pressed {
-  fill: #4a4640;
+  fill: color-mix(in srgb, var(--key-cap), white 22%);
   stroke: #e8e4d8;
 }
 
 .key-letter {
   fill: var(--key-text);
   font-family: var(--font-stamped);
-  font-size: 11px;
+  font-size: 12px;
   text-anchor: middle;
 }
 
-.bell path,
-.bell circle {
-  fill: var(--brass);
+/* The indicator lamp: dim until listening starts, then lit, glowing softly. */
+.lamp-glass {
+  filter: brightness(0.5) saturate(0.6);
+  transition: filter 0.4s ease;
+}
+
+.lamp-glow {
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+body.is-typing .lamp-glass {
+  filter: none;
+}
+
+body.is-typing .lamp-glow {
+  opacity: 0.55;
+}
+
+/* ---------- Background animation ----------
+   A few slow particles behind the page (js/appearance.js places them). The
+   paper, console and typewriter cover them, so they never sit on the text. */
+
+.ambience {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.particle {
+  position: absolute;
+  width: var(--size);
+  height: var(--size);
+  font-size: var(--size);
+  line-height: 1;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}
+
+.shape-dot,
+.shape-glow,
+.shape-bubble,
+.shape-cloud,
+.shape-wisp,
+.shape-blob {
+  border-radius: 50%;
+}
+
+.shape-dot {
+  background: currentColor;
+}
+
+.shape-glow {
+  background: currentColor;
+  box-shadow: 0 0 10px 3px currentColor;
+}
+
+.shape-bubble {
+  border: 1.5px solid currentColor;
+}
+
+.shape-cloud {
+  height: calc(var(--size) * 0.4);
+  background: currentColor;
+  border-radius: 999px;
+}
+
+.shape-wisp,
+.shape-blob {
+  background: radial-gradient(circle, currentColor, transparent 70%);
+}
+
+.shape-petal {
+  background: currentColor;
+  border-radius: 80% 0 80% 0;
+}
+
+.shape-glyph {
+  width: auto;
+  height: auto;
+  font-family: var(--font-typed);
+}
+
+/* Rising and falling particles start just outside the window. */
+.motion-rise {
+  top: 102%;
+  animation-name: ambient-rise;
+}
+
+.motion-fall {
+  top: -6%;
+  animation-name: ambient-fall;
+}
+
+.motion-drift {
+  left: -16%;
+  animation-name: ambient-drift;
+}
+
+.motion-twinkle {
+  animation-name: ambient-twinkle;
+  animation-timing-function: ease-in-out;
+}
+
+.motion-wander {
+  animation-name: ambient-wander;
+  animation-timing-function: ease-in-out;
+}
+
+@keyframes ambient-rise {
+  50% {
+    transform: translate(var(--sway), -55vh);
+  }
+  to {
+    transform: translate(0, -112vh);
+  }
+}
+
+@keyframes ambient-fall {
+  50% {
+    transform: translate(var(--sway), 55vh) rotate(calc(var(--spin) / 2));
+  }
+  to {
+    transform: translate(0, 112vh) rotate(var(--spin));
+  }
+}
+
+@keyframes ambient-drift {
+  50% {
+    transform: translate(66vw, calc(var(--sway) / 2));
+  }
+  to {
+    transform: translate(132vw, 0);
+  }
+}
+
+@keyframes ambient-twinkle {
+  0%,
+  100% {
+    transform: scale(0.6);
+    filter: opacity(0.2);
+  }
+  50% {
+    transform: scale(1);
+    filter: opacity(1);
+  }
+}
+
+@keyframes ambient-wander {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    filter: opacity(0.3);
+  }
+  25% {
+    transform: translate(var(--sway), calc(var(--sway) * -0.6));
+    filter: opacity(1);
+  }
+  50% {
+    transform: translate(calc(var(--sway) * 0.4), var(--sway));
+    filter: opacity(0.5);
+  }
+  75% {
+    transform: translate(calc(var(--sway) * -0.7), calc(var(--sway) * 0.3));
+    filter: opacity(1);
+  }
+}
+
+/* People who ask their computer for less motion get a still page. */
+@media (prefers-reduced-motion: reduce) {
+  .ambience {
+    display: none;
+  }
 }
 
 .back-to-live {
@@ -1026,6 +1486,7 @@ body.is-dropping-file .page {
   .interim-row,
   .back-to-live,
   .typewriter,
+  .ambience,
   .empty-state {
     display: none !important;
   }

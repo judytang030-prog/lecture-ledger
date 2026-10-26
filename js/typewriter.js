@@ -123,8 +123,8 @@ const TYPEBAR_CHARACTERS = "qwertyuiopasdfghjklzxcvbnm.,'-";
 const KEY_ROWS = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 // Where all typebars strike: just under the platen, in the middle (SVG units).
 const STRIKE_POINT = { x: 500, y: 52 };
-const BASKET_RADIUS = 175;
-const TYPEBAR_REST_LENGTH = 105;
+const BASKET_RADIUS = 145;
+const TYPEBAR_REST_LENGTH = 88;
 // Never start more than one strike in this time, so fast catch-up typing stays calm.
 const MIN_MS_BETWEEN_STRIKES = 55;
 // A strike: the typebar flies out to the paper, hits at IMPACT_AT of the way through, and falls back.
@@ -170,20 +170,24 @@ function buildTypebars(container) {
 function buildKeys(container) {
   const keys = new Map();
   KEY_ROWS.forEach((letters, rowIndex) => {
-    const y = 270 + rowIndex * 25;
-    const startX = 500 - ((letters.length - 1) * 36) / 2 + rowIndex * 9;
+    const y = 262 + rowIndex * 32;
+    const startX = 500 - ((letters.length - 1) * 42) / 2 + rowIndex * 11;
     [...letters].forEach((letter, index) => {
       const key = svgElement('g', { class: 'key' });
-      const x = startX + index * 36;
+      const x = startX + index * 42;
+      // Lit from above: a soft shadow below, the cap, and a glint near its top.
       key.append(
-        svgElement('circle', { cx: x, cy: y, r: 12, class: 'key-cap' }),
-        Object.assign(svgElement('text', { x, y: y + 4, class: 'key-letter' }), { textContent: letter }),
+        svgElement('circle', { cx: x + 1, cy: y + 3.5, r: 15, class: 'key-shadow' }),
+        svgElement('circle', { cx: x, cy: y, r: 14.5, class: 'key-cap' }),
+        svgElement('ellipse', { cx: x - 3, cy: y - 6, rx: 7, ry: 3.5, class: 'key-shine' }),
+        Object.assign(svgElement('text', { x, y: y + 4.5, class: 'key-letter' }), { textContent: letter }),
       );
       container.appendChild(key);
       keys.set(letter.toLowerCase(), key);
     });
   });
-  const spaceBar = svgElement('rect', { x: 380, y: 337, width: 240, height: 8, rx: 4, class: 'key-cap space-bar' });
+  container.appendChild(svgElement('rect', { x: 366, y: 359, width: 270, height: 10, rx: 5, class: 'key-shadow' }));
+  const spaceBar = svgElement('rect', { x: 365, y: 356, width: 270, height: 10, rx: 5, class: 'key-cap space-bar' });
   container.appendChild(spaceBar);
   keys.set(' ', spaceBar);
   return keys;
@@ -197,7 +201,7 @@ function createStrikeLayer() {
   return layer;
 }
 
-// svg is the machine's <svg>, which contains #typebars, #keys, #platenRidges and #bell groups.
+// svg is the machine's <svg>, which contains #typebars, #keys, and #platenRidges groups, and the lamp's #lampGlow.
 // getStrikePoint() returns where the next character lands on the paper, in window
 // coordinates ({ x, y }), or null; onImpact() runs when a typebar hits the paper.
 export function createTypewriterMachine(svg, { getStrikePoint = () => null, onImpact = () => {} } = {}) {
@@ -205,7 +209,7 @@ export function createTypewriterMachine(svg, { getStrikePoint = () => null, onIm
   const strikeLayer = createStrikeLayer();
   const keys = buildKeys(svg.querySelector('#keys'));
   const platenRidges = svg.querySelector('#platenRidges');
-  const bell = svg.querySelector('#bell');
+  const lampGlow = svg.querySelector('#lampGlow');
   let lastStrikeTime = 0;
 
   function pressKey(character) {
@@ -327,14 +331,15 @@ export function createTypewriterMachine(svg, { getStrikePoint = () => null, onIm
       pressKey(character);
       if (character.trim()) swingTypebar(character);
     },
-    // A finished sentence: the platen turns to feed the paper up, and the bell rings.
+    // A finished sentence: the platen turns to feed the paper up, and the lamp flashes.
     lineFeed() {
       if (prefersReducedMotion.matches) return;
       platenRidges.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-8px)' }], {
         duration: LINE_FEED_MS,
         easing: LINE_FEED_EASING,
       });
-      bell.animate([{ opacity: 0.25 }, { opacity: 1, offset: 0.15 }, { opacity: 0.25 }], { duration: 600 });
+      // From its current brightness up to full and back (silent, for class).
+      lampGlow.animate([{ opacity: 1, offset: 0.15 }], { duration: 700, easing: 'ease-out' });
     },
   };
 }

@@ -5,6 +5,7 @@ import {
   writeHeadline,
 } from './headlines.js';
 import { DEFAULT_TARGET_LANGUAGE, SOURCE_LANGUAGE, TARGET_LANGUAGES, findTargetLanguage } from './languages.js';
+import { setUpAppearance } from './appearance.js';
 import { appendChunkSegments, segmentsToLines } from './complete-transcript.js';
 import { createLiveDraft } from './live-draft.js';
 import { CAPTURE_SAMPLE_RATE, isAudioCaptureSupported, startAudioCapture } from './recorder.js';
@@ -1460,6 +1461,14 @@ function checkBrowserSupport() {
   }
 }
 
+setUpAppearance({
+  themeButton: document.getElementById('themeButton'),
+  themeButtonLogo: document.getElementById('themeButtonLogo'),
+  themeButtonName: document.getElementById('themeButtonName'),
+  themePanel: document.getElementById('themePanel'),
+  themeGrid: document.getElementById('themeGrid'),
+  ambienceEl: document.getElementById('ambience'),
+});
 diagnosticsEl.hidden = !isDebugMode;
 if (isDebugMode) logAiModelStatus();
 renderTimer();
