@@ -180,7 +180,9 @@ body {
 /* The panel is a popover, so it shows in the browser's top layer, above
    everything on the page. js/appearance.js places it under the Theme button;
    it ends above the bottom of the window, and scrolling inside it never
-   scrolls the page. */
+   scrolls the page. It is part of the current theme: the page's own color
+   and lighting, the theme's background animation drifting behind the cards,
+   and it unrolls downward like paper from the typewriter. */
 .theme-panel {
   position: fixed;
   inset: auto;
@@ -188,22 +190,185 @@ body {
   right: var(--theme-panel-right, 16px);
   margin: 0;
   width: min(720px, calc(100vw - 32px));
-  max-height: min(640px, calc(100vh - var(--theme-panel-top, 80px) - 16px));
+  /* A strip along the bottom edge is the corner companion's home. */
+  padding: 0 0 46px;
+  overflow: hidden;
+  color: var(--on-bg);
+  border-radius: 12px;
+  border: 1.5px solid color-mix(in srgb, var(--on-bg-accent) 60%, transparent);
+  background: var(--backdrop), var(--bg-deep);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  clip-path: inset(0 0 0 0 round 12px);
+  transition:
+    clip-path 0.5s cubic-bezier(0.22, 0.8, 0.3, 1),
+    opacity 0.25s ease,
+    display 0.5s allow-discrete,
+    overlay 0.5s allow-discrete;
+}
+
+.theme-panel:not(:popover-open) {
+  clip-path: inset(0 0 100% 0 round 12px);
+  opacity: 0;
+}
+
+@starting-style {
+  .theme-panel:popover-open {
+    clip-path: inset(0 0 100% 0 round 12px);
+    opacity: 0;
+  }
+}
+
+/* In a window view the backdrop is the sky, so the panel takes the page
+   color, as the title bar does, to keep its text readable. */
+html[data-scene='window'] .theme-panel {
+  background: var(--bg-deep);
+}
+
+.theme-panel-ambience {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.theme-panel-scroll {
+  position: relative;
+  max-height: min(594px, calc(100vh - var(--theme-panel-top, 80px) - 62px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 14px;
-  color: inherit;
-  border-radius: 12px;
-  border: 1px solid var(--panel-border);
-  background: linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  border-bottom: 1px solid color-mix(in srgb, var(--on-bg-accent) 25%, transparent);
+}
+
+/* The theme's small moving companion in the bottom-right corner. */
+.theme-panel-corner {
+  position: absolute;
+  right: 16px;
+  bottom: 3px;
+  z-index: 1;
+  width: 130px;
+  height: 42px;
+  pointer-events: none;
+}
+
+.theme-panel-corner > svg {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.3));
+}
+
+.corner-sway > svg {
+  transform-origin: 50% 100%;
+  animation: corner-sway 3.4s ease-in-out infinite alternate;
+}
+
+.corner-float > svg {
+  animation: corner-float 3.8s ease-in-out infinite alternate;
+}
+
+/* Terracotta: the cactus stands still while its flower sways. */
+.corner-flower .logo-flower {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: corner-sway 2.6s ease-in-out infinite alternate;
+}
+
+@keyframes corner-sway {
+  from {
+    transform: rotate(-4deg);
+  }
+  to {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes corner-float {
+  to {
+    transform: translateY(-5px);
+  }
+}
+
+/* Ocean teal: a fish swims along the bottom, turns, and swims back, its tail
+   wagging and a bubble rising now and then. */
+.corner-swim > svg {
+  height: 24px;
+  bottom: 8px;
+  animation: corner-swim 11s ease-in-out infinite;
+}
+
+.corner-swim .fish-tail {
+  transform-box: fill-box;
+  transform-origin: 0% 50%;
+  animation: fish-tail 0.45s ease-in-out infinite alternate;
+}
+
+@keyframes corner-swim {
+  0% {
+    transform: translate(0, 0) scaleX(1);
+  }
+  44% {
+    transform: translate(-78px, -6px) scaleX(1);
+  }
+  50% {
+    transform: translate(-78px, -6px) scaleX(-1);
+  }
+  94% {
+    transform: translate(0, 0) scaleX(-1);
+  }
+  100% {
+    transform: translate(0, 0) scaleX(1);
+  }
+}
+
+@keyframes fish-tail {
+  from {
+    transform: scaleY(0.8) skewY(-8deg);
+  }
+  to {
+    transform: scaleY(1.1) skewY(8deg);
+  }
+}
+
+.fish-bubble {
+  position: absolute;
+  right: 60px;
+  bottom: 20px;
+  width: 6px;
+  height: 6px;
+  border: 1.2px solid color-mix(in srgb, var(--on-bg) 70%, transparent);
+  border-radius: 50%;
+  opacity: 0;
+  animation: fish-bubble 5.5s ease-out infinite;
+}
+
+.fish-bubble-late {
+  right: 30px;
+  width: 4px;
+  height: 4px;
+  animation-delay: 2.7s;
+}
+
+@keyframes fish-bubble {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
 }
 
 .theme-panel-title {
   margin: 0 0 10px;
   font-family: var(--font-typed);
   font-size: 0.8rem;
-  color: var(--panel-text-muted);
+  color: var(--on-bg-accent);
 }
 
 .theme-grid {
@@ -222,21 +387,21 @@ body {
   display: flex;
   flex-direction: column;
   padding: 0;
-  border: 2px solid transparent;
+  border: 2px solid color-mix(in srgb, var(--on-bg) 12%, transparent);
   border-radius: 10px;
   overflow: hidden;
-  background: color-mix(in srgb, var(--panel-top), white 35%);
-  color: var(--panel-text);
+  background: color-mix(in srgb, var(--bg-deep), var(--on-bg) 8%);
+  color: var(--on-bg);
   text-align: left;
   font-weight: 400;
 }
 
 .theme-card:hover {
-  border-color: color-mix(in srgb, var(--panel-text) 35%, transparent);
+  border-color: color-mix(in srgb, var(--on-bg) 45%, transparent);
 }
 
 .theme-card[aria-pressed='true'] {
-  border-color: var(--panel-text);
+  border-color: var(--on-bg-accent);
 }
 
 /* The little picture of the page: background, control panel, paper, and typewriter. */
@@ -1367,8 +1532,18 @@ body.is-typing .lamp-glow {
 
 /* People who ask their computer for less motion get a still page. */
 @media (prefers-reduced-motion: reduce) {
-  .ambience {
+  .ambience,
+  .theme-panel-ambience {
     display: none;
+  }
+
+  .theme-panel {
+    transition: none;
+  }
+
+  .theme-panel-corner *,
+  .theme-panel-corner > svg {
+    animation: none;
   }
 }
 

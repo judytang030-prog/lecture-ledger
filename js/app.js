@@ -1471,6 +1471,8 @@ setUpAppearance({
   weatherPicker: document.getElementById('weatherPicker'),
   weatherReadout: document.getElementById('weatherReadout'),
   ambienceEl: document.getElementById('ambience'),
+  panelAmbienceEl: document.getElementById('themePanelAmbience'),
+  panelCornerEl: document.getElementById('themePanelCorner'),
   windowViewEl: document.getElementById('windowView'),
   noticesEl,
 });

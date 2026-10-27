@@ -3,7 +3,7 @@
 // out of the window, with the real weather where the student is or the
 // weather chosen by its buttons.
 import { fetchPlaceName, fetchWeather, findLocation } from './live-weather.js';
-import { logoSvg } from './logos.js';
+import { cornerCompanion, logoSvg } from './logos.js';
 import { seededRandom } from './seeded-random.js';
 import { WEATHERS, WEATHER_NAMES, estimatedSunTimes, minutesAfterMidnight, skyColors, sunPosition } from './sky.js';
 import { DEFAULT_THEME_ID, THEMES, WINDOW_THEMES, findTheme, themeVariables } from './themes.js';
@@ -43,6 +43,10 @@ const AMBIENCE_KINDS = {
 export const AMBIENCE_KIND_NAMES = Object.keys(AMBIENCE_KINDS);
 
 function renderAmbience(container, theme) {
+  // Unchanged since last time: the particles carry on where they are.
+  const key = `${theme.id} ${theme.ambience.kind} ${theme.ambience.color}`;
+  if (container.dataset.ambience === key) return;
+  container.dataset.ambience = key;
   const kind = AMBIENCE_KINDS[theme.ambience.kind];
   container.replaceChildren();
   if (!kind) return;
@@ -128,6 +132,17 @@ const DEMO_COLORS = {
   '--demo-machine': 'machine',
 };
 
+// The theme's small moving companion in the panel's bottom-right corner (our
+// own drawings, so setting them as markup is safe). Left alone while the
+// theme stays the same, so it doesn't restart every minute.
+function showPanelCorner(element, theme) {
+  if (element.dataset.themeId === theme.id) return;
+  element.dataset.themeId = theme.id;
+  const { motion, markup } = cornerCompanion(theme);
+  element.className = `theme-panel-corner corner-${motion}`;
+  element.innerHTML = markup;
+}
+
 function themeCard(theme) {
   const card = document.createElement('button');
   card.type = 'button';
@@ -185,6 +200,14 @@ function themeAsShown(theme, { sun, weather }) {
   };
 }
 
+// The background animation inside the Theme panel: the theme's own, or in a
+// window view what the sky has: snow, stars at night, or dust in the sunlight.
+function panelAmbience(shown, { sun, weather }) {
+  if (!shown.dayColors) return shown;
+  if (weather === 'snow') return { ...shown, ambience: { kind: 'snow', color: sun.isDay ? '#8fa6bb' : '#e6ecff' } };
+  return { ...shown, ambience: sun.isDay ? { kind: 'motes', color: '#b89a5e' } : { kind: 'stars', color: '#e6ecff' } };
+}
+
 function weatherButton(weather) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -204,7 +227,8 @@ function showWeatherButtons(weatherPicker, { weather, sun }) {
 }
 
 function applyTheme(theme, scene, elements) {
-  const { ambienceEl, themeButtonLogo, themeButtonName, themeGrid, windowThemeGrid } = elements;
+  const { ambienceEl, panelAmbienceEl, panelCornerEl, themeButtonLogo, themeButtonName, themeGrid, windowThemeGrid } =
+    elements;
   const shown = themeAsShown(theme, scene);
   // The typewriter's lamp shines in the color of the theme's background animation.
   const variables = { ...themeVariables(shown), '--backdrop': shown.backdrop, '--lamp': shown.ambience.color };
@@ -221,6 +245,8 @@ function applyTheme(theme, scene, elements) {
     card.setAttribute('aria-pressed', String(card.dataset.themeId === theme.id));
   }
   renderAmbience(ambienceEl, shown);
+  renderAmbience(panelAmbienceEl, panelAmbience(shown, scene));
+  showPanelCorner(panelCornerEl, shown);
   return variables;
 }
 

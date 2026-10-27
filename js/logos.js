@@ -186,7 +186,7 @@ const DRAWINGS = {
     <path d="M40 66 H31 Q24 66 24 59 V46 Q24 41 28 41 Q32 41 32 46 V58 H40 Z" fill="#5f8f4e"/>
     <path d="M60 58 H69 V40 Q69 35 73 35 Q77 35 77 40 V59 Q77 66 70 66 H60 Z" fill="#6f9f5c"/>
     <path d="M47 36 V94 M53 36 V94" stroke="#7fae6a" stroke-width="1.5" opacity="0.6"/>
-    <g>${flower(50, 28, 3.5, '#f28fa0', '#f7d36b')}</g>
+    <g class="logo-flower">${flower(50, 28, 3.5, '#f28fa0', '#f7d36b')}</g>
     <path d="M30 98 H70 L66 116 H34 Z" fill="#c06b4a"/>
     <rect x="28" y="94" width="44" height="8" rx="2" fill="#a85a3c"/>`,
 
@@ -258,4 +258,39 @@ export function logoSvg(theme) {
   return draw
     ? `<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg" focusable="false">${draw(theme.colors, drawnCount)}</svg>`
     : '';
+}
+
+// A small fish, for the Ocean teal theme's corner of the Theme panel. It faces
+// left; its tail wags on its own.
+const FISH = `
+  <svg viewBox="0 0 80 40" xmlns="http://www.w3.org/2000/svg" focusable="false">
+    <defs>
+      <linearGradient id="cornerFishBody" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#ffb46b"/>
+        <stop offset="1" stop-color="#e2683a"/>
+      </linearGradient>
+    </defs>
+    <path class="fish-tail" d="M58 20 L76 9 Q71 20 76 31 Z" fill="#d45a32"/>
+    <path d="M27 11 Q35 2 46 9 L42 13 Z" fill="#d45a32"/>
+    <path d="M8 20 C16 7 40 5 54 13 Q60 16 62 20 Q60 24 54 27 C40 35 16 33 8 20 Z" fill="url(#cornerFishBody)"/>
+    <path d="M24 12 Q20 20 24 28" stroke="#f7ede2" stroke-width="2.4" fill="none" opacity="0.85"/>
+    <path d="M38 10 Q34 20 38 30" stroke="#f7ede2" stroke-width="2.4" fill="none" opacity="0.6"/>
+    <path d="M30 26 Q36 32 40 27" fill="#d45a32"/>
+    <circle cx="15" cy="18" r="2.4" fill="#1d2b33"/>
+    <circle cx="14.3" cy="17.3" r="0.8" fill="#ffffff"/>
+  </svg>
+  <span class="fish-bubble"></span>
+  <span class="fish-bubble fish-bubble-late"></span>`;
+
+// Logos that bob gently rather than rock from their base.
+const FLOATING_LOGOS = ['lamp', 'moon', 'plane', 'coffee', 'books', 'inkwell', 'lantern', 'shell', 'lava-lamp', 'window', 'window-here'];
+
+// The small moving thing in the Theme panel's bottom-right corner: a fish
+// swimming for Ocean teal, the cactus's flower swaying for Terracotta, and
+// otherwise the theme's own logo, rocking or bobbing. motion names the CSS
+// animation in styles.css.
+export function cornerCompanion(theme) {
+  if (theme.id === 'ocean') return { motion: 'swim', markup: FISH };
+  if (theme.logo === 'cactus') return { motion: 'flower', markup: logoSvg(theme) };
+  return { motion: FLOATING_LOGOS.includes(theme.logo) ? 'float' : 'sway', markup: logoSvg(theme) };
 }
